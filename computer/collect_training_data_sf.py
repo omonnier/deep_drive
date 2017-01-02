@@ -1,8 +1,8 @@
-__author__ = 'zhengwang'
 
 import numpy as np
 import cv2
 import pygame
+import urllib
 from pygame.locals import *
 from socket import * 
 
@@ -23,11 +23,7 @@ ADDR = (HOST, PORT)
 class CollectTrainingData(object):
     
     def __init__(self):
-	self.server_socket = socket()
-        self.server_socket.bind(('',8000))
-        self.server_socket.listen(0)
         # accept a single connection
-        self.connection = self.server_socket.accept()[0].makefile('rb')
         self.send_inst = True
         self.oldSteerCommand = 's'
 
@@ -91,32 +87,32 @@ class CollectTrainingData(object):
 
         # stream video frames one by one
         try:
-            stream_bytes = ' '
+            stream=urllib.urlopen('http://192.168.1.6:8080/?action=stream')
+            bytes=''
             frame = 1
             while self.send_inst:
-                stream_bytes += self.connection.read(1024)
-                first = stream_bytes.find('\xff\xd8')
-                last = stream_bytes.find('\xff\xd9')
-                if first != -1 and last != -1:
-                    jpg = stream_bytes[first:last + 2]
-                    stream_bytes = stream_bytes[last + 2:]
-                    image = cv2.imdecode(np.fromstring(jpg, dtype=np.uint8), cv2.CV_LOAD_IMAGE_GRAYSCALE)
+                bytes+=stream.read(1024)
+                a = bytes.find('\xff\xd8')
+                b = bytes.find('\xff\xd9')
+                if a!=-1 and b!=-1:
+                    jpg = bytes[a:b+2]
+                    bytes= bytes[b+2:]
+                    i = cv2.imdecode(np.fromstring(jpg, dtype=np.uint8),cv2.CV_LOAD_IMAGE_GRAYSCALE)
                     
-                    # select highest half of the image
-                    roi = image[120:240, :]
+                    # select highest half of the image vertical (120/240) and half image horizontal
+                    roi = i[120:240,:]
                     
                     # save streamed images
-                    #cv2.imwrite('training_images/frame{:>05}.jpg'.format(frame), image)
+                    #cv2.imwrite('training_images/frame{:>05}.jpg'.format(frame), i)
                     
                     cv2.imshow('roi_image', roi)
-                    #cv2.imshow('image', image)
+                    #cv2.imshow('image', i)
                     
                     # reshape the roi image into one row array
                     temp_array = roi.reshape(1, 38400).astype(np.float32)
                     
                     frame += 1
                     total_frame += 1
-                    
                     
                     
                     # receive new input from human driver
@@ -235,8 +231,6 @@ class CollectTrainingData(object):
             print 'Dropped frame', total_frame - saved_frame
 
         finally:
-            self.connection.close()
-            self.server_socket.close()
             # stop car server/client
             self.sendSteerCommand('s')
             self.tcpCliSock.close()

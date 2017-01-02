@@ -1,8 +1,9 @@
-__author__ = 'zhengwang'
+
 
 import threading
 import SocketServer
 import cv2
+import urllib
 import numpy as np
 import math
 from socket import *
@@ -181,7 +182,7 @@ class SensorDataHandler(SocketServer.BaseRequestHandler):
             print "Connection closed on thread 2"
 
 '''
-class VideoStreamHandler(SocketServer.StreamRequestHandler):
+class VideoStreamHandler(object):
     '''
     # h1: stop sign
     h1 = 15.5 - 10  # cm
@@ -209,117 +210,112 @@ class VideoStreamHandler(SocketServer.StreamRequestHandler):
     stop_time = 0
     drive_time_after_stop = 0
     '''
-    def handle(self):
+    global sensor_data
+    stop_flag = False
+    stop_sign_active = True
+    print 'start try'
+    # stream video frames one by one
+    try:
+        stream=urllib.urlopen('http://192.168.1.6:8080/?action=stream')
+        bytes=''
+        while True:
+            bytes+=stream.read(1024)
+            a = bytes.find('\xff\xd8')
+            b = bytes.find('\xff\xd9')
+            if a!=-1 and b!=-1:
+                jpg = bytes[a:b+2]
+                bytes= bytes[b+2:]
+                image = cv2.imdecode(np.fromstring(jpg, dtype=np.uint8),cv2.CV_LOAD_IMAGE_GRAYSCALE)
 
-        global sensor_data
-        stream_bytes = ' '
-        stop_flag = False
-        stop_sign_active = True
+                # lower half of the image
+                half_gray = image[120:240,:]
+                '''
+                # object detection
+                v_param1 = self.obj_detection.detect(self.stop_cascade, gray, image)
+                v_param2 = self.obj_detection.detect(self.light_cascade, gray, image)
 
-        # stream video frames one by one
-        try:
-            while True:
-                stream_bytes += self.rfile.read(1024)
-                first = stream_bytes.find('\xff\xd8')
-                last = stream_bytes.find('\xff\xd9')
-                if first != -1 and last != -1:
-                    jpg = stream_bytes[first:last+2]
-                    stream_bytes = stream_bytes[last+2:]
-                    gray = cv2.imdecode(np.fromstring(jpg, dtype=np.uint8), cv2.CV_LOAD_IMAGE_GRAYSCALE)
-                    image = cv2.imdecode(np.fromstring(jpg, dtype=np.uint8), cv2.CV_LOAD_IMAGE_UNCHANGED)
+                # distance measurement
+                if v_param1 > 0 or v_param2 > 0:
+                    d1 = self.d_to_camera.calculate(v_param1, self.h1, 300, image)
+                    d2 = self.d_to_camera.calculate(v_param2, self.h2, 100, image)
+                    self.d_stop_sign = d1
+                    self.d_light = d2
+                '''
+                #cv2.imshow('image', image)
+                cv2.imshow('mlp_image', half_gray)
 
-                    # lower half of the image
-                    half_gray = gray[120:240, :]
-                    '''
-                    # object detection
-                    v_param1 = self.obj_detection.detect(self.stop_cascade, gray, image)
-                    v_param2 = self.obj_detection.detect(self.light_cascade, gray, image)
+                # reshape image
+                image_array = half_gray.reshape(1, 38400).astype(np.float32)
+                
+                # neural network makes prediction
+                prediction = model.predict(image_array)
 
-                    # distance measurement
-                    if v_param1 > 0 or v_param2 > 0:
-                        d1 = self.d_to_camera.calculate(v_param1, self.h1, 300, image)
-                        d2 = self.d_to_camera.calculate(v_param2, self.h2, 100, image)
-                        self.d_stop_sign = d1
-                        self.d_light = d2
-                    '''
-                    #cv2.imshow('image', image)
-                    cv2.imshow('mlp_image', half_gray)
+                ############### TO BE REMOVE WHEN OBJ DETECTION ENABLE ####################
+                rc_car.steer(prediction)
+                '''
+                # stop conditions
+                if sensor_data is not None and sensor_data < 30:
+                    print("Stop, obstacle in front")
+                    self.rc_car.stop()
+                
+                elif 0 < self.d_stop_sign < 25 and stop_sign_active:
+                    print("Stop sign ahead")
+                    self.rc_car.stop()
 
-                    # reshape image
-                    image_array = half_gray.reshape(1, 38400).astype(np.float32)
-                    
-                    # neural network makes prediction
-                    prediction = self.model.predict(image_array)
-
-                    ############### TO BE REMOVE WHEN OBJ DETECTION ENABLE ####################
-                    self.rc_car.steer(prediction)
-                    '''
-                    # stop conditions
-                    if sensor_data is not None and sensor_data < 30:
-                        print("Stop, obstacle in front")
-                        self.rc_car.stop()
-                    
-                    elif 0 < self.d_stop_sign < 25 and stop_sign_active:
-                        print("Stop sign ahead")
-                        self.rc_car.stop()
-
-                        # stop for 5 seconds
-                        if stop_flag is False:
-                            self.stop_start = cv2.getTickCount()
-                            stop_flag = True
-                        self.stop_finish = cv2.getTickCount()
-
-                        self.stop_time = (self.stop_finish - self.stop_start)/cv2.getTickFrequency()
-                        print "Stop time: %.2fs" % self.stop_time
-
-                        # 5 seconds later, continue driving
-                        if self.stop_time > 5:
-                            print("Waited for 5 seconds")
-                            stop_flag = False
-                            stop_sign_active = False
-
-                    elif 0 < self.d_light < 30:
-                        #print("Traffic light ahead")
-                        if self.obj_detection.red_light:
-                            print("Red light")
-                            self.rc_car.stop()
-                        elif self.obj_detection.green_light:
-                            print("Green light")
-                            pass
-                        elif self.obj_detection.yellow_light:
-                            print("Yellow light flashing")
-                            pass
-                        
-                        self.d_light = 30
-                        self.obj_detection.red_light = False
-                        self.obj_detection.green_light = False
-                        self.obj_detection.yellow_light = False
-
-                    else:
-                        self.rc_car.steer(prediction)
+                    # stop for 5 seconds
+                    if stop_flag is False:
                         self.stop_start = cv2.getTickCount()
-                        self.d_stop_sign = 25
+                        stop_flag = True
+                    self.stop_finish = cv2.getTickCount()
 
-                        if stop_sign_active is False:
-                            self.drive_time_after_stop = (self.stop_start - self.stop_finish)/cv2.getTickFrequency()
-                            if self.drive_time_after_stop > 5:
-                                stop_sign_active = True
-                    '''
-                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                    self.stop_time = (self.stop_finish - self.stop_start)/cv2.getTickFrequency()
+                    print "Stop time: %.2fs" % self.stop_time
+
+                    # 5 seconds later, continue driving
+                    if self.stop_time > 5:
+                        print("Waited for 5 seconds")
+                        stop_flag = False
+                        stop_sign_active = False
+
+                elif 0 < self.d_light < 30:
+                    #print("Traffic light ahead")
+                    if self.obj_detection.red_light:
+                        print("Red light")
                         self.rc_car.stop()
-                        break
+                    elif self.obj_detection.green_light:
+                        print("Green light")
+                        pass
+                    elif self.obj_detection.yellow_light:
+                        print("Yellow light flashing")
+                        pass
+                    
+                    self.d_light = 30
+                    self.obj_detection.red_light = False
+                    self.obj_detection.green_light = False
+                    self.obj_detection.yellow_light = False
 
-            cv2.destroyAllWindows()
+                else:
+                    self.rc_car.steer(prediction)
+                    self.stop_start = cv2.getTickCount()
+                    self.d_stop_sign = 25
 
-        finally:
-            print "Connection closed on thread 1"
+                    if stop_sign_active is False:
+                        self.drive_time_after_stop = (self.stop_start - self.stop_finish)/cv2.getTickFrequency()
+                        if self.drive_time_after_stop > 5:
+                            stop_sign_active = True
+                '''
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    rc_car.stop()
+                    break
+
+        cv2.destroyAllWindows()
+
+    finally:
+        print "Connection closed on thread 1"
 
 
 class ThreadServer(object):
 
-    def server_thread(host, port):
-        server = SocketServer.TCPServer((host, port), VideoStreamHandler)
-        server.serve_forever()
     '''
     def server_thread2(host, port):
         server = SocketServer.TCPServer((host, port), SensorDataHandler)
@@ -328,7 +324,7 @@ class ThreadServer(object):
     distance_thread = threading.Thread(target=server_thread2, args=('192.168.1.100', 8002))
     distance_thread.start()
     '''
-    video_thread = threading.Thread(target=server_thread('192.168.1.100', 8000))
+    video_thread = threading.Thread(target=VideoStreamHandler)
     video_thread.start()
 
 if __name__ == '__main__':
