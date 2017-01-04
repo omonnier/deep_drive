@@ -45,8 +45,10 @@ class RCControl(object):
         print('connected to car')
         # init car and speed
         print 'set Speed'
-        self.tcpCliSock.send('speed' + str(6))  # Send the speed data
+        self.speed=25
+        self.tcpCliSock.send('speed' + str(self.speed))  # Send the speed data
         self.oldSteerCommand = 's'
+        self.direction = 'none'
 
     def sendSteerCommand(self,command):
         '''
@@ -57,13 +59,25 @@ class RCControl(object):
         if (command is 'f'):
             self.tcpCliSock.sendall('home')
             self.tcpCliSock.sendall('forward')
+            self.direction = 'forward'
         elif (command is 's'):
             self.tcpCliSock.sendall('home')
-            #self.tcpCliSock.sendall('stop')
+            self.tcpCliSock.sendall('stop')
         elif (command is 'r'):
-            self.tcpCliSock.sendall('right')
+            #turn rigth only if forward detected
+            if self.direction is 'forward' :
+                self.tcpCliSock.sendall('right')
+            else:
+                self.tcpCliSock.sendall('home')
         elif (command is 'l'):
-            self.tcpCliSock.sendall('left')  
+            if self.direction is 'forward' :
+                self.tcpCliSock.sendall('left')
+            else:
+                self.tcpCliSock.sendall('home')
+        elif (command is 'b'):
+            self.direction = 'backward'
+            self.tcpCliSock.sendall('home')
+            self.tcpCliSock.sendall('backward')
 
         self.oldSteerCommand = command
         
@@ -83,11 +97,12 @@ class RCControl(object):
             
         elif prediction == 3:
             print("stop")
-            self.sendSteerCommand('s')
+            #self.sendSteerCommand('s')
    
     def stop(self):
-        print("stop")
-        self.tcpCliSock.sendall('stop')
+        print("stop test")
+        self.sendSteerCommand('s')
+        self.tcpCliSock.close()
 '''
 class DistanceToCamera(object):
 
@@ -315,13 +330,16 @@ class VideoStreamHandler(object):
                             stop_sign_active = True
                 '''
                 if cv2.waitKey(1) & 0xFF == ord('q'):
-                    rc_car.stop()
                     break
 
         cv2.destroyAllWindows()
 
     finally:
         print "Connection closed on thread 1"
+        # stop car server/client
+        rc_car.stop()
+
+
 
 
 class ThreadServer(object):
