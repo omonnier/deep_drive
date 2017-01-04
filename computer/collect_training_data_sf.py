@@ -11,8 +11,11 @@ ctrl_cmd = ['forward', 'backward', 'left', 'right', 'stop', 'read cpu_temp', 'ho
 
 
 #HOST = '192.168.1.5'    # Server(Raspberry Pi) IP address
-HOST = '192.168.1.6'    # Server(Raspberry Pi) IP address
+#HOST = '192.168.1.6'    # Server(Raspberry Pi) IP address
 #HOST = '10.246.50.143'    # Server(Raspberry Pi) IP address
+HOST = '10.246.51.95'    # Server(Raspberry Pi) IP address
+#HOST = '169.254.77.149'    # Server(Raspberry Pi) IP address
+
 PORT = 21567
 ADDR = (HOST, PORT)
 
@@ -53,14 +56,18 @@ class CollectTrainingData(object):
         else:
         '''
         if (command is 'f'):
+            print("Forward")
             self.tcpCliSock.sendall('home')
             self.tcpCliSock.sendall('forward')
         elif (command is 's'):
+            print("stop")
             self.tcpCliSock.sendall('home')
             self.tcpCliSock.sendall('stop')
         elif (command is 'r'):
+            print("right")
             self.tcpCliSock.sendall('right')
         elif (command is 'l'):
+            print("left")
             self.tcpCliSock.sendall('left')  
 
         self.oldSteerCommand = command
@@ -86,21 +93,22 @@ class CollectTrainingData(object):
         self.tcpCliSock.send('speed' + str(8))  # Send the speed data
 
         # stream video frames one by one
-        try:
-            stream=urllib.urlopen('http://192.168.1.6:8080/?action=stream')
+        try:         
             bytes=''
             frame = 1
+            stream=urllib.urlopen('http://' + HOST + ':8080/?action=stream')
             while self.send_inst:
-                bytes+=stream.read(1024)
+                bytes += stream.read(1024)
                 a = bytes.find('\xff\xd8')
                 b = bytes.find('\xff\xd9')
+                
                 if a!=-1 and b!=-1:
                     jpg = bytes[a:b+2]
-                    bytes= bytes[b+2:]
+                    
                     i = cv2.imdecode(np.fromstring(jpg, dtype=np.uint8),cv2.CV_LOAD_IMAGE_GRAYSCALE)
                     
                     # select highest half of the image vertical (120/240) and half image horizontal
-                    roi = i[120:240,:]
+                    roi = i[0:120,:]
                     
                     # save streamed images
                     #cv2.imwrite('training_images/frame{:>05}.jpg'.format(frame), i)
@@ -112,46 +120,13 @@ class CollectTrainingData(object):
                     temp_array = roi.reshape(1, 38400).astype(np.float32)
                     
                     frame += 1
-                    total_frame += 1
-                    
+                    total_frame += 1                    
                     
                     # receive new input from human driver
                     for event in pygame.event.get():
                         if event.type == KEYDOWN:
                             key_input = pygame.key.get_pressed()
-                    
-                    #if event.type == KEYDOWN:
-                    
-                    # complex orders
-                    '''
-                    if key_input[pygame.K_UP] and key_input[pygame.K_RIGHT]:
-                        print("Forward Right")
-                        image_array = np.vstack((image_array, temp_array))
-                        label_array = np.vstack((label_array, self.k[1]))
-                        saved_frame += 1
-                        self.tcpCliSock.send('forward')
-                        self.tcpCliSock.send('right')
 
-                    elif key_input[pygame.K_UP] and key_input[pygame.K_LEFT]:
-                        print("Forward Left")
-                        image_array = np.vstack((image_array, temp_array))
-                        label_array = np.vstack((label_array, self.k[0]))
-                        saved_frame += 1
-                        self.tcpCliSock.send('forward')
-                        self.tcpCliSock.send('left')
-
-                    elif key_input[pygame.K_DOWN] and key_input[pygame.K_RIGHT]:
-                        print("Reverse Right")
-                        self.tcpCliSock.send('backward')
-                        self.tcpCliSock.send('right')
-                    
-                    elif key_input[pygame.K_DOWN] and key_input[pygame.K_LEFT]:
-                        print("Reverse Left")
-                        self.tcpCliSock.send('backward')
-                        self.tcpCliSock.send('left')
-                        
-                    # simple orders
-                    '''
                     if key_input[pygame.K_x] or key_input[pygame.K_q]:
                         print 'exit'
                         self.send_inst = False
@@ -186,10 +161,9 @@ class CollectTrainingData(object):
                         label_array = np.vstack((label_array, self.k[0]))
                         saved_frame += 1
                         self.sendSteerCommand('l')
-                        
-                    '''
-                    # search for key up
-                    #elif event.type == pygame.KEYUP:
+
+                   '''
+                    # KEYUP management not needed for now
                     elif event.type == pygame.KEYUP and key_input[pygame.K_UP] == 0:
                         print 'stop'
                         saved_frame += 1
@@ -211,6 +185,12 @@ class CollectTrainingData(object):
                         self.tcpCliSock.send('stop')
                         break
                     '''
+
+
+
+                    del stream 
+                    stream=urllib.urlopen('http://10.246.51.95:8080/?action=stream')
+                    bytes=''
                     
             # save training images and labels
             train = image_array[1:, :]
