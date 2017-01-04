@@ -126,6 +126,7 @@ class CollectTrainingData(object):
                     for event in pygame.event.get():
                         if event.type == KEYDOWN:
                             key_input = pygame.key.get_pressed()
+                            
 
                     if key_input[pygame.K_x] or key_input[pygame.K_q]:
                         print 'exit'
@@ -134,7 +135,6 @@ class CollectTrainingData(object):
                         break
                     
                     elif key_input[pygame.K_UP]:
-                        print("Forward")
                         saved_frame += 1
                         image_array = np.vstack((image_array, temp_array))
                         label_array = np.vstack((label_array, self.k[2]))
@@ -142,27 +142,24 @@ class CollectTrainingData(object):
                        
                 
                     elif key_input[pygame.K_DOWN]:
-                        print("stop")
                         saved_frame += 1
                         image_array = np.vstack((image_array, temp_array))
                         label_array = np.vstack((label_array, self.k[3]))
                         self.sendSteerCommand('s')
                     
                     elif key_input[pygame.K_RIGHT]:
-                        print("Right")
                         image_array = np.vstack((image_array, temp_array))
                         label_array = np.vstack((label_array, self.k[1]))
                         saved_frame += 1
                         self.sendSteerCommand('r')
 
                     elif key_input[pygame.K_LEFT]:
-                        print("Left")
                         image_array = np.vstack((image_array, temp_array))
                         label_array = np.vstack((label_array, self.k[0]))
                         saved_frame += 1
                         self.sendSteerCommand('l')
 
-                   '''
+                    '''
                     # KEYUP management not needed for now
                     elif event.type == pygame.KEYUP and key_input[pygame.K_UP] == 0:
                         print 'stop'
@@ -185,7 +182,6 @@ class CollectTrainingData(object):
                         self.tcpCliSock.send('stop')
                         break
                     '''
-
 
 
                     del stream 

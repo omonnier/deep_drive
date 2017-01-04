@@ -7,7 +7,8 @@ import os
 top = Tk()   # Create a top window
 top.title('Raspberry Pi Smart Video Car Calibration')
 
-HOST = '192.168.1.5'    # Server(Raspberry Pi) IP address
+#HOST = '192.168.1.5'    # Server(Raspberry Pi) IP address
+HOST = '10.246.51.95'    # Server(Raspberry Pi) IP address
 #HOST = '192.168.1.6'    # Server(Raspberry Pi) IP address
 #HOST = '10.246.50.143'    # Server(Raspberry Pi) IP address
 PORT = 21567
