@@ -12,8 +12,9 @@ from socket import *
 sensor_data = " "
 
 #HOST = '192.168.1.5'    # Server(Raspberry Pi) IP address
-HOST = '192.168.1.6'    # Server(Raspberry Pi) IP address
+#HOST = '192.168.1.6'    # Server(Raspberry Pi) IP address
 #HOST = '10.246.50.143'    # Server(Raspberry Pi) IP address
+HOST = '10.246.51.95'    # Server(Raspberry Pi) IP address
 PORT = 21567
 ADDR = (HOST, PORT)
 
@@ -44,7 +45,7 @@ class RCControl(object):
         print('connected to car')
         # init car and speed
         print 'set Speed'
-        self.tcpCliSock.send('speed' + str(8))  # Send the speed data
+        self.tcpCliSock.send('speed' + str(6))  # Send the speed data
         self.oldSteerCommand = 's'
 
     def sendSteerCommand(self,command):
@@ -216,19 +217,22 @@ class VideoStreamHandler(object):
     print 'start try'
     # stream video frames one by one
     try:
-        stream=urllib.urlopen('http://192.168.1.6:8080/?action=stream')
+
         bytes=''
+        frame = 1
+        stream=urllib.urlopen('http://' + HOST + ':8080/?action=stream')
         while True:
-            bytes+=stream.read(1024)
+            bytes += stream.read(1024)
             a = bytes.find('\xff\xd8')
             b = bytes.find('\xff\xd9')
+            
             if a!=-1 and b!=-1:
                 jpg = bytes[a:b+2]
-                bytes= bytes[b+2:]
+                
                 image = cv2.imdecode(np.fromstring(jpg, dtype=np.uint8),cv2.CV_LOAD_IMAGE_GRAYSCALE)
 
                 # lower half of the image
-                half_gray = image[120:240,:]
+                half_gray = image[0:120,:]
                 '''
                 # object detection
                 v_param1 = self.obj_detection.detect(self.stop_cascade, gray, image)
@@ -252,6 +256,12 @@ class VideoStreamHandler(object):
 
                 ############### TO BE REMOVE WHEN OBJ DETECTION ENABLE ####################
                 rc_car.steer(prediction)
+
+                # flush stream to avoid cumulative frames
+                del stream 
+                stream=urllib.urlopen('http://10.246.51.95:8080/?action=stream')
+                bytes=''
+                
                 '''
                 # stop conditions
                 if sensor_data is not None and sensor_data < 30:
