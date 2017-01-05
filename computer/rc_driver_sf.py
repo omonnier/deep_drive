@@ -45,7 +45,7 @@ class RCControl(object):
         print('connected to car')
         # init car and speed
         print 'set Speed'
-        self.speed=25
+        self.speed=18
         self.tcpCliSock.send('speed' + str(self.speed))  # Send the speed data
         self.oldSteerCommand = 's'
         self.direction = 'none'
@@ -274,7 +274,7 @@ class VideoStreamHandler(object):
 
                 # flush stream to avoid cumulative frames
                 del stream 
-                stream=urllib.urlopen('http://10.246.51.95:8080/?action=stream')
+                stream=urllib.urlopen('http://' + HOST + ':8080/?action=stream')
                 bytes=''
                 
                 '''
