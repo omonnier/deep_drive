@@ -185,7 +185,7 @@ class CollectTrainingData(object):
 
 
                     del stream 
-                    stream=urllib.urlopen('http://10.246.51.95:8080/?action=stream')
+                    stream=urllib.urlopen('http://' + HOST + ':8080/?action=stream')
                     bytes=''
                     
             # save training images and labels
