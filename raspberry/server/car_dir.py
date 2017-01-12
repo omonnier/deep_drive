@@ -22,6 +22,7 @@ def setup():
 	rightPWM += offset
 	pwm = servo.PWM()         # Initialize the servo controller.
 	pwm.set_frequency(60)
+	#pwm.set_debug(True)
 
 # ==========================================================================================
 # Control the servo connected to channel 0 of the servo control board, so as to make the 

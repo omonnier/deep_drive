@@ -26,7 +26,6 @@ MAX_ANGLE    = 50
 STEP_CAPTURE = 2
 STEP_REPLAY  = 5
 
-
 turning_offset = 0
 
 class CollectTrainingData(object):
@@ -43,10 +42,10 @@ class CollectTrainingData(object):
         print('connected to car')
 
         # create labels
-        self.k = np.zeros((15, 15), 'byte')
+        self.k = np.zeros((15, 15), np.uint8)
         for i in range(15):
             self.k[i, i] = 1
-        self.temp_label = np.zeros((1, 15), 'byte')
+        self.temp_label = np.zeros((1, 15), np.uint8)
         
         pygame.init()
         # use the window ygame to enter direction
@@ -115,14 +114,14 @@ class CollectTrainingData(object):
         # collect images for training
         print 'Start collecting images...'
         e1 = cv2.getTickCount()
-        image_array = np.zeros((1, 38400),'byte')
-        label_array = np.zeros(1, 'byte')
+        image_array = np.zeros((1, 38400), np.uint8)
+        label_array = np.zeros(1, np.uint8)
 
         key_input = pygame.key.get_pressed()
 
         # init car and speed
         print 'set Speed'
-        self.tcpCliSock.send('speed' + str(8))  # Send the speed data
+        self.tcpCliSock.send('speed' + str(5))  # Send the speed data
 
         # stream video frames one by one
         try:         
@@ -155,7 +154,7 @@ class CollectTrainingData(object):
                     #cv2.imshow('image', i)
                     
                     # reshape the roi image into one row array
-                    temp_array = roi.reshape(1, 38400).astype(np.byte)
+                    temp_array = roi.reshape(1, 38400).astype(np.uint8)
                     
                     frame += 1
                     total_frame += 1                    
@@ -205,11 +204,15 @@ class CollectTrainingData(object):
 							if event.key == K_RIGHT:
 								if key_input[pygame.K_LEFT]:
 									last_key_pressed = K_LEFT
+								else:
+									last_key_pressed = 0
 									
 							elif event.key == K_LEFT:
 								if key_input[pygame.K_RIGHT]:
 									last_key_pressed = K_RIGHT
-									
+								else:
+									last_key_pressed = 0
+
 							else:
 								last_key_pressed = 0
 
@@ -238,8 +241,13 @@ class CollectTrainingData(object):
 						saved_frame += 1
 						image_array = np.vstack((image_array, temp_array))
 						label_array = np.vstack((label_array, np.array([turn_angle ])))
+
 								
 								
+
+            # Convert image in float
+            image_array = np.asarray (image_array, np.float32)
+
             # save training images and labels
             train = image_array[1:, :]
             train_labels = label_array[1:, :]

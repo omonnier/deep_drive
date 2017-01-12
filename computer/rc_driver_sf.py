@@ -278,8 +278,12 @@ class VideoStreamHandler(object):
                 cv2.imshow('mlp_image', half_gray)
 
                 # reshape image
-                image_array = half_gray.reshape(1, 38400).astype(np.float32)
+                image_array = half_gray.reshape(1, 38400).astype(np.uint8)
                 
+                # Convert image in float 
+                image_array = np.asarray (image_array, np.float32)
+                print image_array;
+				
                 # neural network makes prediction
                 prediction = model.predict(image_array)
                 print "Pred = " + str(prediction)

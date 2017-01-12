@@ -17,10 +17,10 @@ print 'Loading training data...'
 e0 = cv2.getTickCount()
 
 # load training data
-image_array  = np.zeros((1, 38400), dtype=np.float)
-angle_array  = np.zeros(1, dtype=np.int)
-train_labels = np.zeros((0, number_output), dtype=np.float)
-eye_array    = np.eye  (number_output, dtype=np.float)
+image_array  = np.zeros((1, 38400), dtype=np.float32)
+angle_array  = np.zeros(1, dtype=np.uint8)
+train_labels = np.zeros((0, number_output), dtype=np.float32)
+eye_array    = np.eye  (number_output, dtype=np.float32)
 
 training_data = glob.glob('training_data/*.npz')
 
@@ -33,6 +33,7 @@ for single_npz in training_data:
         print angle_array_temp.shape
     image_array = np.vstack((image_array, train_temp))
     angle_array = np.vstack((angle_array, angle_array_temp))
+
 
 # Build training labels from 0 .. N  based on angle_array
 for angle in angle_array:
@@ -67,6 +68,7 @@ params = dict(term_crit = criteria,
                bp_dw_scale = 0.001,
                bp_moment_scale = 0.0 )
 
+
 print 'Training MLP ...'
 num_iter = model.train(train, train_labels, None, params = params)
 
@@ -89,3 +91,4 @@ print 'True labels:', true_labels
 print 'Testing...'
 train_rate = np.mean(prediction == true_labels)
 print 'Train rate: %f:' % (train_rate*100)
+
