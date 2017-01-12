@@ -10,7 +10,10 @@ MAX_ANGLE    = 50
 STEP_CAPTURE = 2
 STEP_REPLAY  = 5
 
-# Comment + 1  ...
+# Number of NeuralNetwork output = 
+#  => (MAX - MIN) / STEP : Number of values except 0
+#  =>  + 1 to handle angle = 0
+#  =>  + 1 to handle stop command
 number_output = (MAX_ANGLE - MIN_ANGLE) / STEP_REPLAY + 1 + 1
 
 print 'Loading training data...'

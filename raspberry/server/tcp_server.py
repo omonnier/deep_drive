@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import RPi.GPIO as GPIO
 import video_dir
-import car_dir
+import car_dir_deep_drive
 import motor
 import re
 from socket import *
@@ -22,10 +22,10 @@ tcpSerSock.listen(5)     # The parameter of listen() defines the number of conne
                          # connections are full, others will be rejected. 
 
 video_dir.setup()
-car_dir.setup()
+car_dir_deep_drive.setup()
 motor.setup()     # Initialize the Raspberry Pi GPIO connected to the DC motor. 
 video_dir.home_x_y()
-car_dir.home()
+car_dir_deep_drive.home()
 
 while True:	
 	# Get offset from config file
@@ -57,13 +57,13 @@ while True:
 				motor.backward()
 			elif data == ctrl_cmd[2]:
 				print 'recv left cmd'
-				car_dir.turn_left()
+				car_dir_deep_drive.turn_left()
 			elif data == ctrl_cmd[3]:
 				print 'recv right cmd'
-				car_dir.turn_right()
+				car_dir_deep_drive.turn_right()
 			elif data == ctrl_cmd[6]:
 				print 'recv home cmd'
-				car_dir.home()
+				car_dir_deep_drive.home()
 			elif data == ctrl_cmd[4]:
 				print 'recv stop cmd'
 				motor.ctrl(0)
@@ -98,11 +98,11 @@ while True:
 						spd = 24
 					motor.setSpeed(spd)
 			elif data[0:5] == 'turn=':	#Turning Angle
-				print 'data =', data
 				angle = data.split('=')[1]
+				print 'angle =', angle
 				try:
 					angle = int(angle)
-					car_dir.turn(angle)
+					car_dir_deep_drive.turn(angle)
 				except:
 					print 'Error: angle =', angle
 			elif data[0:8] == 'forward=':
@@ -118,19 +118,19 @@ while True:
 				spd = data.split('=')[1]
 				try:
 					spd = int(spd)
-								motor.backward(spd)
+					motor.backward(spd)
 				except:
 					print 'ERROR, speed =', spd
 
 			elif data[0:7] == 'offset+':
 				offset = offset + int(data[7:])
 				print 'Turning offset', offset
-				car_dir.calibrate(offset)
+				car_dir_deep_drive.calibrate(offset)
 				
 			elif data[0:7] == 'offset-':
 				offset = offset - int(data[7:])
 				print 'Turning offset', offset
-				car_dir.calibrate(offset)
+				car_dir_deep_drive.calibrate(offset)
 
 			else:
 				print 'Command Error! Cannot recognize command: ' + data

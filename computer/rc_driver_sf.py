@@ -23,7 +23,10 @@ MIN_ANGLE    = -50
 MAX_ANGLE    = 50
 STEP_REPLAY  = 5
 
-# Comment to add to explain formula ...
+# Number of NeuralNetwork output = 
+#  => (MAX - MIN) / STEP : Number of values except 0
+#  =>  + 1 to handle angle = 0
+#  =>  + 1 to handle stop command
 number_output = (MAX_ANGLE - MIN_ANGLE) / STEP_REPLAY + 1 + 1
 
 
@@ -59,9 +62,6 @@ class RCControl(object):
 
     def sendSteerCommand(self,command):
         
-        print "Command = " + command
-        print "Old = " + self.oldSteerCommand
-		
         #if (command == self.oldSteerCommand):
         #   return
         #else:

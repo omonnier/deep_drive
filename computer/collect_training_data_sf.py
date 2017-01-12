@@ -78,22 +78,6 @@ class CollectTrainingData(object):
             print("left")
             self.tcpCliSock.sendall('left>')
 		
-		# Handle turn using offset
-		#  => Positive offset means right offset
-		#  => Negative offset means left offset
-        elif (command is 'right_offset'):
-            print("right -> offset+10 with turning_offset = %d" % (turning_offset) )
-            if (turning_offset < 100):
-				self.tcpCliSock.sendall('offset+10>')
-				turning_offset += 10
-        elif (command is 'left_offset'):
-            print("left -> offset-10 with turning_offset = %d" % (turning_offset) )
-            # self.tcpCliSock.sendall('left')  
-            if (turning_offset > -100):
-				self.tcpCliSock.sendall('offset-10>')
-				turning_offset -= 10
-
-		
         # Handle turn using angle
         #  => Positive offset means right offset
         #  => Negative offset means left offset
