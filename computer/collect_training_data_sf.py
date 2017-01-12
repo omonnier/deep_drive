@@ -13,15 +13,20 @@ ctrl_cmd = ['forward', 'backward', 'left', 'right', 'stop', 'read cpu_temp', 'ho
 #HOST = '192.168.1.5'    # Server(Raspberry Pi) IP address
 #HOST = '192.168.1.6'    # Server(Raspberry Pi) IP address
 #HOST = '10.246.50.143'    # Server(Raspberry Pi) IP address
-HOST = '10.246.51.95'    # Server(Raspberry Pi) IP address
+HOST = '10.246.50.29'    # Server(Raspberry Pi) IP address
 #HOST = '169.254.77.149'    # Server(Raspberry Pi) IP address
 
 PORT = 21567
 ADDR = (HOST, PORT)
 
+MIN_ANGLE    = -50
+MAX_ANGLE    = 50
 
+# STEP_CAPTURE should always be lower than STEP_REPLAY 
+STEP_CAPTURE = 2
+STEP_REPLAY  = 5
 
-    
+turning_offset = 0
 
 class CollectTrainingData(object):
     
@@ -37,10 +42,10 @@ class CollectTrainingData(object):
         print('connected to car')
 
         # create labels
-        self.k = np.zeros((4, 4), 'float')
-        for i in range(4):
+        self.k = np.zeros((15, 15), np.uint8)
+        for i in range(15):
             self.k[i, i] = 1
-        self.temp_label = np.zeros((1, 4), 'float')
+        self.temp_label = np.zeros((1, 15), np.uint8)
         
         pygame.init()
         # use the window ygame to enter direction
@@ -55,21 +60,31 @@ class CollectTrainingData(object):
             return
         else:
         '''
+        global turning_offset
+
         if (command is 'f'):
             print("Forward")
-            self.tcpCliSock.sendall('home')
-            self.tcpCliSock.sendall('forward')
+            #self.tcpCliSock.sendall('home')
+            self.tcpCliSock.sendall('forward>')
         elif (command is 's'):
             print("stop")
-            self.tcpCliSock.sendall('home')
-            self.tcpCliSock.sendall('stop')
+            self.tcpCliSock.sendall('home>')
+            self.tcpCliSock.sendall('stop>')
+		# Handle right/left commands
         elif (command is 'r'):
             print("right")
-            self.tcpCliSock.sendall('right')
+            self.tcpCliSock.sendall('right>')
         elif (command is 'l'):
             print("left")
-            self.tcpCliSock.sendall('left')  
-
+            self.tcpCliSock.sendall('left>')
+		
+        # Handle turn using angle
+        #  => Positive offset means right offset
+        #  => Negative offset means left offset
+        elif command[0:5] == 'turn=':
+            print(command )
+            self.tcpCliSock.sendall(command)
+				
         self.oldSteerCommand = command
         
 
@@ -83,19 +98,24 @@ class CollectTrainingData(object):
         # collect images for training
         print 'Start collecting images...'
         e1 = cv2.getTickCount()
-        image_array = np.zeros((1, 38400))
-        label_array = np.zeros((1, 4), 'float')
+        image_array = np.zeros((1, 38400), np.uint8)
+        label_array = np.zeros(1, np.uint8)
 
         key_input = pygame.key.get_pressed()
 
         # init car and speed
         print 'set Speed'
-        self.tcpCliSock.send('speed' + str(8))  # Send the speed data
+        self.tcpCliSock.send('speed' + str(5))  # Send the speed data
 
         # stream video frames one by one
         try:         
             bytes=''
             frame = 1
+            next_turn = 0
+            last_key_pressed = 0
+            turn_angle = 0
+            record = 0
+			
             stream=urllib.urlopen('http://' + HOST + ':8080/?action=stream')
             while self.send_inst:
                 bytes += stream.read(1024)
@@ -104,6 +124,7 @@ class CollectTrainingData(object):
                 
                 if a!=-1 and b!=-1:
                     jpg = bytes[a:b+2]
+                    bytes = bytes[b+2:]
                     
                     i = cv2.imdecode(np.fromstring(jpg, dtype=np.uint8),cv2.CV_LOAD_IMAGE_GRAYSCALE)
                     
@@ -117,77 +138,100 @@ class CollectTrainingData(object):
                     #cv2.imshow('image', i)
                     
                     # reshape the roi image into one row array
-                    temp_array = roi.reshape(1, 38400).astype(np.float32)
+                    temp_array = roi.reshape(1, 38400).astype(np.uint8)
                     
                     frame += 1
                     total_frame += 1                    
-                    
+                    event_handled = 0
+
                     # receive new input from human driver
                     for event in pygame.event.get():
-                        if event.type == KEYDOWN:
-                            key_input = pygame.key.get_pressed()
-                            
+						event_handled = 1
 
-                    if key_input[pygame.K_x] or key_input[pygame.K_q]:
-                        print 'exit'
-                        self.send_inst = False
-                        self.sendSteerCommand('s')
-                        break
+					# Check Key pressed
+                    if event.type == KEYDOWN:
+						if event.key == K_x or event.key == K_q or event.key == K_a or event.key == K_ESCAPE:
+							print 'exit'
+							self.send_inst = False
+							self.sendSteerCommand('s')
+							break
                     
-                    elif key_input[pygame.K_UP]:
-                        saved_frame += 1
-                        image_array = np.vstack((image_array, temp_array))
-                        label_array = np.vstack((label_array, self.k[2]))
-                        self.sendSteerCommand('f')
+						elif event.key == K_UP:
+							last_key_pressed = K_UP
+							saved_frame += 1
+							self.sendSteerCommand('f')
+							record = 1
                        
-                
-                    elif key_input[pygame.K_DOWN]:
-                        saved_frame += 1
-                        image_array = np.vstack((image_array, temp_array))
-                        label_array = np.vstack((label_array, self.k[3]))
-                        self.sendSteerCommand('s')
+						elif event.key == K_DOWN:
+							last_key_pressed = K_DOWN
+							saved_frame += 1
+							image_array = np.vstack((image_array, temp_array))
+							label_array = np.vstack((label_array, np.array([255])  ))
+							self.sendSteerCommand('s')
                     
-                    elif key_input[pygame.K_RIGHT]:
-                        image_array = np.vstack((image_array, temp_array))
-                        label_array = np.vstack((label_array, self.k[1]))
-                        saved_frame += 1
-                        self.sendSteerCommand('r')
+						elif event.key == K_RIGHT:
+							last_key_pressed = K_RIGHT
+							if (turn_angle < MAX_ANGLE ): 
+								turn_angle += STEP_CAPTURE
+							self.sendSteerCommand('turn=%d>' % (turn_angle) )
 
-                    elif key_input[pygame.K_LEFT]:
-                        image_array = np.vstack((image_array, temp_array))
-                        label_array = np.vstack((label_array, self.k[0]))
-                        saved_frame += 1
-                        self.sendSteerCommand('l')
+						elif event.key == K_LEFT:
+							last_key_pressed = K_LEFT
+							if (turn_angle > MIN_ANGLE ):
+								turn_angle -= STEP_CAPTURE
+							self.sendSteerCommand('turn=%d>' % (turn_angle) )
+							
+					# In case there is an KEYUP event for Left/right
+					# Check if the other key is still down					
+                    elif event.type == KEYUP:
+							key_input = pygame.key.get_pressed()
+							if event.key == K_RIGHT:
+								if key_input[pygame.K_LEFT]:
+									last_key_pressed = K_LEFT
+								else:
+									last_key_pressed = 0
+									
+							elif event.key == K_LEFT:
+								if key_input[pygame.K_RIGHT]:
+									last_key_pressed = K_RIGHT
+								else:
+									last_key_pressed = 0
 
-                    '''
-                    # KEYUP management not needed for now
-                    elif event.type == pygame.KEYUP and key_input[pygame.K_UP] == 0:
-                        print 'stop'
-                        saved_frame += 1
-                        image_array = np.vstack((image_array, temp_array))
-                        label_array = np.vstack((label_array, self.k[4]))
-                        self.tcpCliSock.send('stop')
-                        
-                    elif ((key_input[pygame.K_LEFT] == 0) and (key_input[pygame.K_RIGHT] == 0)):
-                        print 'home'
-                        saved_frame += 1
-                        image_array = np.vstack((image_array, temp_array))
-                        label_array = np.vstack((label_array, self.k[3]))
-                        self.tcpCliSock.send('home')
-
-                    elif key_input[pygame.K_x] or key_input[pygame.K_q]:
-                        print 'exit'
-                        self.send_inst = False
-                        self.tcpCliSock.send('home')
-                        self.tcpCliSock.send('stop')
-                        break
-                    '''
+							else:
+								last_key_pressed = 0
 
 
-                    del stream 
-                    stream=urllib.urlopen('http://' + HOST + ':8080/?action=stream')
-                    bytes=''
-                    
+                    else:
+						last_key_pressed = 0
+						
+							
+							
+					# Turning specific handling.
+					
+					#  Key still down ==> Continue turning right/left
+					#  Key still up   ==> Continue goig back to home
+                    if event_handled == 0:
+						if (last_key_pressed == K_RIGHT):
+							if (turn_angle < MAX_ANGLE ): 
+								turn_angle += STEP_CAPTURE
+							self.sendSteerCommand('turn=%d>' % (turn_angle) )
+
+						elif last_key_pressed == K_LEFT:
+							if (turn_angle > MIN_ANGLE ):
+								turn_angle -= STEP_CAPTURE
+							self.sendSteerCommand('turn=%d>' % (turn_angle) )
+
+                    if (record == 1):
+						saved_frame += 1
+						image_array = np.vstack((image_array, temp_array))
+						label_array = np.vstack((label_array, np.array([turn_angle ])))
+
+								
+								
+
+            # Convert image in float
+            image_array = np.asarray (image_array, np.float32)
+
             # save training images and labels
             train = image_array[1:, :]
             train_labels = label_array[1:, :]

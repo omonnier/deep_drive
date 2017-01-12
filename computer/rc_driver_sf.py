@@ -14,10 +14,20 @@ sensor_data = " "
 #HOST = '192.168.1.5'    # Server(Raspberry Pi) IP address
 #HOST = '192.168.1.6'    # Server(Raspberry Pi) IP address
 #HOST = '10.246.50.143'    # Server(Raspberry Pi) IP address
-HOST = '10.246.51.95'    # Server(Raspberry Pi) IP address
+HOST = '10.246.50.29'    # Server(Raspberry Pi) IP address
 PORT = 21567
 ADDR = (HOST, PORT)
 
+
+MIN_ANGLE    = -50
+MAX_ANGLE    = 50
+STEP_REPLAY  = 5
+
+# Number of NeuralNetwork output = 
+#  => (MAX - MIN) / STEP : Number of values except 0
+#  =>  + 1 to handle angle = 0
+#  =>  + 1 to handle stop command
+number_output = (MAX_ANGLE - MIN_ANGLE) / STEP_REPLAY + 1 + 1
 
 
 class NeuralNetwork(object):
@@ -26,7 +36,7 @@ class NeuralNetwork(object):
         self.model = cv2.ANN_MLP()
 
     def create(self):
-        layer_size = np.int32([38400, 32, 4])
+        layer_size = np.int32([38400, 32, number_output])
         self.model.create(layer_size)
         self.model.load('mlp_xml/mlp.xml')
 
@@ -51,11 +61,11 @@ class RCControl(object):
         self.direction = 'none'
 
     def sendSteerCommand(self,command):
-        '''
-        if (command is self.oldSteerCommand):
-            return
-        else:
-        '''
+        
+        #if (command == self.oldSteerCommand):
+        #   return
+        #else:
+        
         if (command is 'f'):
             self.tcpCliSock.sendall('home')
             self.tcpCliSock.sendall('forward')
@@ -78,26 +88,26 @@ class RCControl(object):
             self.direction = 'backward'
             self.tcpCliSock.sendall('home')
             self.tcpCliSock.sendall('backward')
-
+			
+        # Handle turn using angle
+        #  => Positive offset means right offset
+        #  => Negative offset means left offset
+        elif command[0:5] == 'turn=':
+            print(command )
+            self.tcpCliSock.sendall(command)
+				
         self.oldSteerCommand = command
         
         
     def steer(self, prediction):
-        if prediction == 2:
-            print("Forward")
-            self.sendSteerCommand('f')
-            
-        elif prediction == 0:
-            print("Left")
-            self.sendSteerCommand('l')
-            
-        elif prediction == 1:
-            print("Right")
-            self.sendSteerCommand('r')
-            
-        elif prediction == 3:
+        if prediction == 0:
             print("stop")
             #self.sendSteerCommand('s')
+            
+        else:
+			angle = ((prediction - 1 ) * STEP_REPLAY) - MAX_ANGLE
+			command = 'turn=' + str(int(angle))+'>'
+			self.sendSteerCommand(command)
    
     def stop(self):
         print("stop test")
@@ -236,6 +246,10 @@ class VideoStreamHandler(object):
         bytes=''
         frame = 1
         stream=urllib.urlopen('http://' + HOST + ':8080/?action=stream')
+		
+        # Send forward command to strt motor
+        rc_car.sendSteerCommand('f')
+		
         while True:
             bytes += stream.read(1024)
             a = bytes.find('\xff\xd8')
@@ -264,11 +278,16 @@ class VideoStreamHandler(object):
                 cv2.imshow('mlp_image', half_gray)
 
                 # reshape image
-                image_array = half_gray.reshape(1, 38400).astype(np.float32)
+                image_array = half_gray.reshape(1, 38400).astype(np.uint8)
                 
+                # Convert image in float 
+                image_array = np.asarray (image_array, np.float32)
+                print image_array;
+				
                 # neural network makes prediction
                 prediction = model.predict(image_array)
-
+                print "Pred = " + str(prediction)
+				
                 ############### TO BE REMOVE WHEN OBJ DETECTION ENABLE ####################
                 rc_car.steer(prediction)
 

@@ -7,9 +7,9 @@ def Map(x, in_min, in_max, out_min, out_max):
 
 def setup():
 	global leftPWM, rightPWM, homePWM, pwm
-	leftPWM = 400
+	leftPWM = 370
 	homePWM = 450
-	rightPWM = 500
+	rightPWM = 530
 	offset =0
 	try:
 		for line in open('config'):
@@ -44,7 +44,7 @@ def turn_right():
 # ==========================================================================================
 
 def turn(angle):
-	angle = Map(angle, 0, 255, leftPWM, rightPWM)
+	angle = Map(angle, -50, 50, leftPWM, rightPWM)
 	pwm.set_value(0, 0, angle)
 
 def home():
