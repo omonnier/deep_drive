@@ -7,8 +7,8 @@ print 'Loading training data...'
 e0 = cv2.getTickCount()
 
 # load training data
-image_array = np.zeros((1, 38400))
-label_array = np.zeros((1, 4), 'float')
+image_array = np.zeros((1, 38400),dtype=np.float32)
+label_array = np.zeros((1, 4),dtype=np.float32)
 training_data = glob.glob('training_data/*.npz')
 
 for single_npz in training_data:

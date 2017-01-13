@@ -4,7 +4,8 @@ import cv2
 import pygame
 import urllib
 from pygame.locals import *
-from socket import * 
+from socket import *
+from datetime import datetime
 
 #### client to control sf car
 ctrl_cmd = ['forward', 'backward', 'left', 'right', 'stop', 'read cpu_temp', 'home', 'distance', 'x+', 'x-', 'y+', 'y-', 'xy_home']
@@ -13,10 +14,10 @@ ctrl_cmd = ['forward', 'backward', 'left', 'right', 'stop', 'read cpu_temp', 'ho
 #HOST = '192.168.1.5'    # Server(Raspberry Pi) IP address
 #HOST = '192.168.1.6'    # Server(Raspberry Pi) IP address
 #HOST = '10.246.50.143'    # Server(Raspberry Pi) IP address
-HOST = '10.246.51.95'    # Server(Raspberry Pi) IP address
+HOST = '10.246.50.153'    # Server(Raspberry Pi) IP address
 #HOST = '169.254.77.149'    # Server(Raspberry Pi) IP address
 
-PORT = 21567
+PORT = 8001
 ADDR = (HOST, PORT)
 
 
@@ -37,10 +38,10 @@ class CollectTrainingData(object):
         print('connected to car')
 
         # create labels
-        self.k = np.zeros((4, 4), 'float')
+        self.k = np.zeros((4, 4),dtype=np.uint8)
         for i in range(4):
             self.k[i, i] = 1
-        self.temp_label = np.zeros((1, 4), 'float')
+        self.temp_label = np.zeros((1, 4),dtype=np.uint8)
         
         pygame.init()
         # use the window ygame to enter direction
@@ -83,28 +84,37 @@ class CollectTrainingData(object):
         # collect images for training
         print 'Start collecting images...'
         e1 = cv2.getTickCount()
-        image_array = np.zeros((1, 38400))
-        label_array = np.zeros((1, 4), 'float')
+        image_array = np.zeros((1, 38400),dtype=np.uint8)
+        label_array = np.zeros((1, 4), dtype=np.uint8)
 
         key_input = pygame.key.get_pressed()
 
         # init car and speed
         print 'set Speed'
-        self.tcpCliSock.send('speed' + str(8))  # Send the speed data
+        self.tcpCliSock.send('speed' + str(30))  # Send the speed data
 
         # stream video frames one by one
         try:         
             bytes=''
             frame = 1
-            stream=urllib.urlopen('http://' + HOST + ':8080/?action=stream')
+            stream=urllib.urlopen('http://' + HOST + ':8000/?action=stream')
+            dt=datetime.now()
+            time1=dt.microsecond
             while self.send_inst:
                 bytes += stream.read(1024)
                 a = bytes.find('\xff\xd8')
-                b = bytes.find('\xff\xd9')
-                
+                b = bytes.find('\xff\xd9') 
                 if a!=-1 and b!=-1:
-                    jpg = bytes[a:b+2]
+                    #little check on frame received
+                    dt=datetime.now()                    
+                    #print "time1 = %.1f"%((dt.microsecond-time1) / 1000)
+                    time1=((dt.microsecond-time1) / 1000)
+                    if (time1 > 80):
+                        print "frame received later than expected = %.1f"%(time1)
+                    time1=dt.microsecond
                     
+                    jpg = bytes[a:b+2]
+                    bytes = bytes[b+2:]
                     i = cv2.imdecode(np.fromstring(jpg, dtype=np.uint8),cv2.CV_LOAD_IMAGE_GRAYSCALE)
                     
                     # select highest half of the image vertical (120/240) and half image horizontal
@@ -117,7 +127,7 @@ class CollectTrainingData(object):
                     #cv2.imshow('image', i)
                     
                     # reshape the roi image into one row array
-                    temp_array = roi.reshape(1, 38400).astype(np.float32)
+                    temp_array = roi.reshape(1, 38400).astype(np.uint8)
                     
                     frame += 1
                     total_frame += 1                    
@@ -158,6 +168,8 @@ class CollectTrainingData(object):
                         label_array = np.vstack((label_array, self.k[0]))
                         saved_frame += 1
                         self.sendSteerCommand('l')
+                    
+                    
 
                     '''
                     # KEYUP management not needed for now
@@ -183,11 +195,6 @@ class CollectTrainingData(object):
                         break
                     '''
 
-
-                    del stream 
-                    stream=urllib.urlopen('http://' + HOST + ':8080/?action=stream')
-                    bytes=''
-                    
             # save training images and labels
             train = image_array[1:, :]
             train_labels = label_array[1:, :]
@@ -212,5 +219,4 @@ class CollectTrainingData(object):
             self.tcpCliSock.close()
 
 if __name__ == '__main__':
-
     CollectTrainingData()

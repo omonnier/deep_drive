@@ -1,23 +1,37 @@
-
-
-import threading
-import SocketServer
 import cv2
-import urllib
 import numpy as np
 import math
-from socket import *
+import threading
+import Queue
+import time
+from ClientSocket import *
+from SteerSocket import *
+from VideoSocket import *
+from SensorSocket import *
+from datetime import datetime
 
 # distance data measured by ultrasonic sensor
 sensor_data = " "
 
-#HOST = '192.168.1.5'    # Server(Raspberry Pi) IP address
-#HOST = '192.168.1.6'    # Server(Raspberry Pi) IP address
-#HOST = '10.246.50.143'    # Server(Raspberry Pi) IP address
-HOST = '10.246.51.95'    # Server(Raspberry Pi) IP address
-PORT = 21567
-ADDR = (HOST, PORT)
+#CAR_IP = '192.168.1.5'    # Server(Raspberry Pi) IP address
+#CAR_IP = '192.168.1.6'    # Server(Raspberry Pi) IP address
+#CAR_IP = '10.246.50.143'    # Server(Raspberry Pi) IP address
+CAR_IP = '10.246.50.153'    # Server(Raspberry Pi) IP address
 
+PORT_VIDEO_SERVER = 8000
+PORT_STEER_SERVER = 8001
+PORT_SENSOR_SERVER = 8002
+ADDR_VIDEO_SERVER = (CAR_IP, PORT_VIDEO_SERVER)
+ADDR_STEER_SERVER = (CAR_IP, PORT_STEER_SERVER)
+ADDR_SENSOR_SERVER = (CAR_IP, PORT_SENSOR_SERVER)
+
+#client to enable
+videoClientEnable = True
+steerClientEnable = True
+sensorClientEnable = True
+
+
+####################################### Neural Network definition ##############################
 
 
 class NeuralNetwork(object):
@@ -35,325 +49,201 @@ class NeuralNetwork(object):
         return resp.argmax(-1)
 
 
-class RCControl(object):
+####################################### Deep Drive Thread ##############################
 
-    def __init__(self):
-        print('end PC server connection ... Start now Client connection to car server')
-        # car connection
-        self.tcpCliSock = socket(AF_INET, SOCK_STREAM)   # Create a socket
-        self.tcpCliSock.connect(ADDR)                    # Connect with the server
-        print('connected to car')
-        # init car and speed
-        print 'set Speed'
-        self.speed=18
-        self.tcpCliSock.send('speed' + str(self.speed))  # Send the speed data
-        self.oldSteerCommand = 's'
-        self.direction = 'none'
-
-    def sendSteerCommand(self,command):
-        '''
-        if (command is self.oldSteerCommand):
-            return
-        else:
-        '''
-        if (command is 'f'):
-            self.tcpCliSock.sendall('home')
-            self.tcpCliSock.sendall('forward')
-            self.direction = 'forward'
-        elif (command is 's'):
-            self.tcpCliSock.sendall('home')
-            self.tcpCliSock.sendall('stop')
-        elif (command is 'r'):
-            #turn rigth only if forward detected
-            if self.direction is 'forward' :
-                self.tcpCliSock.sendall('right')
-            else:
-                self.tcpCliSock.sendall('home')
-        elif (command is 'l'):
-            if self.direction is 'forward' :
-                self.tcpCliSock.sendall('left')
-            else:
-                self.tcpCliSock.sendall('home')
-        elif (command is 'b'):
-            self.direction = 'backward'
-            self.tcpCliSock.sendall('home')
-            self.tcpCliSock.sendall('backward')
-
-        self.oldSteerCommand = command
-        
-        
-    def steer(self, prediction):
-        if prediction == 2:
-            print("Forward")
-            self.sendSteerCommand('f')
-            
-        elif prediction == 0:
-            print("Left")
-            self.sendSteerCommand('l')
-            
-        elif prediction == 1:
-            print("Right")
-            self.sendSteerCommand('r')
-            
-        elif prediction == 3:
-            print("stop")
-            #self.sendSteerCommand('s')
-   
-    def stop(self):
-        print("stop test")
-        self.sendSteerCommand('s')
-        self.tcpCliSock.close()
-'''
-class DistanceToCamera(object):
-
-    def __init__(self):
-        # camera params
-        self.alpha = 8.0 * math.pi / 180
-        self.v0 = 119.865631204
-        self.ay = 332.262498472
-
-    def calculate(self, v, h, x_shift, image):
-        # compute and return the distance from the target point to the camera
-        d = h / math.tan(self.alpha + math.atan((v - self.v0) / self.ay))
-        if d > 0:
-            cv2.putText(image, "%.1fcm" % d,
-                (image.shape[1] - x_shift, image.shape[0] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        return d
-
-
-class ObjectDetection(object):
-
-    def __init__(self):
-        self.red_light = False
-        self.green_light = False
-        self.yellow_light = False
-
-    def detect(self, cascade_classifier, gray_image, image):
-
-        # y camera coordinate of the target point 'P'
-        v = 0
-
-        # minimum value to proceed traffic light state validation
-        threshold = 150     
-        
-        # detection
-        cascade_obj = cascade_classifier.detectMultiScale(
-            gray_image,
-            scaleFactor=1.1,
-            minNeighbors=5,
-            minSize=(30, 30),
-            flags=cv2.cv.CV_HAAR_SCALE_IMAGE
-        )
-
-        # draw a rectangle around the objects
-        for (x_pos, y_pos, width, height) in cascade_obj:
-            cv2.rectangle(image, (x_pos+5, y_pos+5), (x_pos+width-5, y_pos+height-5), (255, 255, 255), 2)
-            v = y_pos + height - 5
-            #print(x_pos+5, y_pos+5, x_pos+width-5, y_pos+height-5, width, height)
-
-            # stop sign
-            if width/height == 1:
-                cv2.putText(image, 'STOP', (x_pos, y_pos-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            
-            # traffic lights
-            else:
-                roi = gray_image[y_pos+10:y_pos + height-10, x_pos+10:x_pos + width-10]
-                mask = cv2.GaussianBlur(roi, (25, 25), 0)
-                (minVal, maxVal, minLoc, maxLoc) = cv2.minMaxLoc(mask)
-                
-                # check if light is on
-                if maxVal - minVal > threshold:
-                    cv2.circle(roi, maxLoc, 5, (255, 0, 0), 2)
-                    
-                    # Red light
-                    if 1.0/8*(height-30) < maxLoc[1] < 4.0/8*(height-30):
-                        cv2.putText(image, 'Red', (x_pos+5, y_pos-5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-                        self.red_light = True
-                    
-                    # Green light
-                    elif 5.5/8*(height-30) < maxLoc[1] < height-30:
-                        cv2.putText(image, 'Green', (x_pos+5, y_pos - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                        self.green_light = True
+class DeepDriveThread(threading.Thread):
     
-                    # yellow light
-                    #elif 4.0/8*(height-30) < maxLoc[1] < 5.5/8*(height-30):
-                    #    cv2.putText(image, 'Yellow', (x_pos+5, y_pos - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
-                    #    self.yellow_light = True
-        return v
+    def __init__(self):
+        #call init
+        threading.Thread.__init__(self)
+        
+        #create Video Stream Client Thread
+        self.sctVideoStream = VideoThread()
+        self.sctVideoStream.name = 'VideoSocketThread'
+        self.sctVideoStream.start()
+        
+
+        #create Steer Client Thread
+        self.sctSteer = SteerThread()
+        self.sctSteer.name = 'SteerSocketThread'
+        self.sctSteer.start()
+
+        
+        #create Sensor Client Thread
+        self.sctSensor = SensorThread()
+        self.sctSensor.name = 'SensorSocketThread'
+        self.sctSensor.start()
+        
+        #connect All client
+        self.ConnectClient()
+             
+        # create neural network
+        self.model = NeuralNetwork()
+        self.model.create()
 
 
-class SensorDataHandler(SocketServer.BaseRequestHandler):
+    def ConnectClient(self):
+        # loop until all client connected
+        videoClientConnected = False
+        steerClientConnected = False
+        sensorClientConnected = False
+        
+        #launch connection thread for all client
+        self.sctVideoStream.cmd_q.put(ClientCommand(ClientCommand.CONNECT, 'http://' + CAR_IP + ':' + str(PORT_VIDEO_SERVER) + '/?action=stream'))
+        self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.CONNECT, ADDR_STEER_SERVER))
+        self.sctSensor.cmd_q.put(ClientCommand(ClientCommand.CONNECT, ADDR_SENSOR_SERVER))
 
-    data = " "
+        while ( (videoClientConnected != videoClientEnable) or
+                (steerClientConnected != steerClientEnable) or
+                (sensorClientConnected != sensorClientEnable) ):
 
-    def handle(self):
-        global sensor_data
-        try:
-            while self.data:
-                self.data = self.request.recv(1024)
-                sensor_data = round(float(self.data), 1)
-                #print "{} sent:".format(self.client_address[0])
-                print sensor_data
-        finally:
-            print "Connection closed on thread 2"
-
-'''
-class VideoStreamHandler(object):
-    '''
-    # h1: stop sign
-    h1 = 15.5 - 10  # cm
-    # h2: traffic light
-    h2 = 15.5 - 10
-    '''
-    # create neural network
-    model = NeuralNetwork()
-    model.create()
-    '''
-    obj_detection = ObjectDetection()
-    '''
-    rc_car = RCControl()
-    '''
-    # cascade classifiers
-    stop_cascade = cv2.CascadeClassifier('cascade_xml/stop_sign.xml')
-    light_cascade = cv2.CascadeClassifier('cascade_xml/traffic_light.xml')
-
-    d_to_camera = DistanceToCamera()
-    d_stop_sign = 25
-    d_light = 25
-
-    stop_start = 0              # start time when stop at the stop sign
-    stop_finish = 0
-    stop_time = 0
-    drive_time_after_stop = 0
-    '''
-    global sensor_data
-    stop_flag = False
-    stop_sign_active = True
-    print 'start try'
-    # stream video frames one by one
-    try:
-
-        bytes=''
-        frame = 1
-        stream=urllib.urlopen('http://' + HOST + ':8080/?action=stream')
-        while True:
-            bytes += stream.read(1024)
-            a = bytes.find('\xff\xd8')
-            b = bytes.find('\xff\xd9')
+            #wait for .5 second before to check 
+            time.sleep(0.5)
             
-            if a!=-1 and b!=-1:
-                jpg = bytes[a:b+2]
+            if (videoClientConnected != videoClientEnable):
+                try:
+                    reply = self.sctVideoStream.reply_q.get(False)
+                    if reply.type == ClientReply.SUCCESS:
+                        videoClientConnected=True
+                        print 'Video stream server connected'
+                except Queue.Empty:
+                    print 'Video Client not connected'
+
+            if (steerClientConnected != steerClientEnable):
+                try:
+                    reply = self.sctSteer.reply_q.get(False)
+                    if reply.type == ClientReply.SUCCESS:
+                        steerClientConnected=True
+                        print 'Steer server connected'
+                except Queue.Empty:
+                    print 'Steer Client not connected'
+
+            if (sensorClientConnected != sensorClientEnable):
+                try:
+                    reply = self.sctSensor.reply_q.get(False)
+                    if reply.type == ClientReply.SUCCESS:
+                        sensorClientConnected=True
+                        print 'Sensor server connected'
+                except Queue.Empty:
+                    print 'Sensor Client not connected'
+            
+        
+    def run(self):
                 
-                image = cv2.imdecode(np.fromstring(jpg, dtype=np.uint8),cv2.CV_LOAD_IMAGE_GRAYSCALE)
+        #Send speed to car 
+        print 'set Speed'
+        self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('SPEED',30)))
+        #initial steer command set to stop
+        NNsteerCommand = 3
+        oldSteerCommand = NNsteerCommand+1
+        try:
+            print 'Start Main Thread for Deep Drive'
+            time1=0
+            
+            #start receiver thread client to receive continuously data
+            if videoClientEnable == True :
+                self.sctVideoStream.cmd_q.put(ClientCommand(ClientCommand.RECEIVE_IMAGE,''))
 
-                # lower half of the image
-                half_gray = image[0:120,:]
-                '''
-                # object detection
-                v_param1 = self.obj_detection.detect(self.stop_cascade, gray, image)
-                v_param2 = self.obj_detection.detect(self.light_cascade, gray, image)
-
-                # distance measurement
-                if v_param1 > 0 or v_param2 > 0:
-                    d1 = self.d_to_camera.calculate(v_param1, self.h1, 300, image)
-                    d2 = self.d_to_camera.calculate(v_param2, self.h2, 100, image)
-                    self.d_stop_sign = d1
-                    self.d_light = d2
-                '''
-                #cv2.imshow('image', image)
-                cv2.imshow('mlp_image', half_gray)
-
-                # reshape image
-                image_array = half_gray.reshape(1, 38400).astype(np.float32)
+            if sensorClientEnable == True :
+                 self.sctSensor.cmd_q.put(ClientCommand(ClientCommand.RECEIVE,''))
+       
+            while True:
                 
-                # neural network makes prediction
-                prediction = model.predict(image_array)
+                ############################# Manage IMAGE for Deep neural network to extract Steer Command ###############
+                try:
+                    # try to see if image ready
+                    reply = self.sctVideoStream.reply_q.get(True,1)
+                    if reply.type == ClientReply.SUCCESS:
 
-                ############### TO BE REMOVE WHEN OBJ DETECTION ENABLE ####################
-                rc_car.steer(prediction)
+                        #little check on frame received
+                        dt=datetime.now()      
+                        #print "time1 = %.1f"%((dt.microsecond-time1) / 1000)
+                        time1 = dt.microsecond
+                            
+                        #check if we want to stop autonomous driving
+                        if cv2.waitKey(1) & 0xFF == ord('q'):
+                            break
+     
+                        #print length as debug
+                        #print 'length =' + str(len(self.sctVideoStream.lastImage))
+                        
+                        #decode jpg into array
+                        image = cv2.imdecode(np.fromstring(self.sctVideoStream.lastImage, dtype=np.uint8),cv2.CV_LOAD_IMAGE_GRAYSCALE)
 
-                # flush stream to avoid cumulative frames
-                del stream 
-                stream=urllib.urlopen('http://' + HOST + ':8080/?action=stream')
-                bytes=''
+                        # lower half of the image
+                        half_gray = image[0:120,:]
+
+                        #cv2.imshow('image', image)
+                        cv2.imshow('mlp_image', half_gray)
+
+                        # reshape image
+                        image_array = half_gray.reshape(1, 38400).astype(np.float32)
+
+                        # neural network makes prediction
+                        NNsteerCommand = self.model.predict(image_array)
+                   
+                    else:
+                        print 'Error getting image :' + str(reply.data)
+                        break
+                        
+                except Queue.Empty:
+                    #queue empty most of the time because image not ready
+                    pass
+
+
+                ############################# Get Sensor value ###############
+                try:
+                    # try to see if image ready
+                    reply = self.sctSensor.reply_q.get(False)
+                    if reply.type == ClientReply.SUCCESS:
+                        if (reply.data < 50):
+                            print 'sensor value = ' + str(reply.data)
+                            self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_COMMAND','stop')))
+                        else:
+                            self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_COMMAND','forward')))
+                        
+                    else:
+                        print 'Error getting Sensor :' + str(reply.data)
+                        break
+                        
+                except Queue.Empty:
+                    #queue empty most of the time because image not ready
+                    pass
+
+
+                ############### Control Car with all the input we can have ####################
                 
-                '''
-                # stop conditions
-                if sensor_data is not None and sensor_data < 30:
-                    print("Stop, obstacle in front")
-                    self.rc_car.stop()
+                # for the moment we just have DNN prediction :
+                if oldSteerCommand != NNsteerCommand :
+                    self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_NN',NNsteerCommand)))
+                    oldSteerCommand = NNsteerCommand
                 
-                elif 0 < self.d_stop_sign < 25 and stop_sign_active:
-                    print("Stop sign ahead")
-                    self.rc_car.stop()
-
-                    # stop for 5 seconds
-                    if stop_flag is False:
-                        self.stop_start = cv2.getTickCount()
-                        stop_flag = True
-                    self.stop_finish = cv2.getTickCount()
-
-                    self.stop_time = (self.stop_finish - self.stop_start)/cv2.getTickFrequency()
-                    print "Stop time: %.2fs" % self.stop_time
-
-                    # 5 seconds later, continue driving
-                    if self.stop_time > 5:
-                        print("Waited for 5 seconds")
-                        stop_flag = False
-                        stop_sign_active = False
-
-                elif 0 < self.d_light < 30:
-                    #print("Traffic light ahead")
-                    if self.obj_detection.red_light:
-                        print("Red light")
-                        self.rc_car.stop()
-                    elif self.obj_detection.green_light:
-                        print("Green light")
-                        pass
-                    elif self.obj_detection.yellow_light:
-                        print("Yellow light flashing")
-                        pass
-                    
-                    self.d_light = 30
-                    self.obj_detection.red_light = False
-                    self.obj_detection.green_light = False
-                    self.obj_detection.yellow_light = False
-
-                else:
-                    self.rc_car.steer(prediction)
-                    self.stop_start = cv2.getTickCount()
-                    self.d_stop_sign = 25
-
-                    if stop_sign_active is False:
-                        self.drive_time_after_stop = (self.stop_start - self.stop_finish)/cv2.getTickFrequency()
-                        if self.drive_time_after_stop > 5:
-                            stop_sign_active = True
-                '''
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    break
-
-        cv2.destroyAllWindows()
-
-    finally:
-        print "Connection closed on thread 1"
-        # stop car server/client
-        rc_car.stop()
-
-
-
-
-class ThreadServer(object):
-
-    '''
-    def server_thread2(host, port):
-        server = SocketServer.TCPServer((host, port), SensorDataHandler)
-        server.serve_forever()
-
-    distance_thread = threading.Thread(target=server_thread2, args=('192.168.1.100', 8002))
-    distance_thread.start()
-    '''
-    video_thread = threading.Thread(target=VideoStreamHandler)
-    video_thread.start()
-
+                
+        finally:
+            #stop and close all client and close them
+            self.sctVideoStream.cmd_q.put(ClientCommand(ClientCommand.STOP))
+            self.sctVideoStream.cmd_q.put(ClientCommand(ClientCommand.CLOSE))
+            self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.STOP))
+            self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.CLOSE))
+            self.sctSensor.cmd_q.put(ClientCommand(ClientCommand.STOP))
+            self.sctSensor.cmd_q.put(ClientCommand(ClientCommand.CLOSE))
+            #let 1 second for process to close
+            time.sleep(1)
+            #and make sure all of them ended properly
+            self.sctVideoStream.join()
+            self.sctSteer.join()
+            self.sctSensor.join()
+              
 if __name__ == '__main__':
-    ThreadServer()
+    #create Deep drive thread and strt
+    DDriveThread = DeepDriveThread()
+    DDriveThread.name = 'DDriveThread'
+    
+    #start
+    DDriveThread.start()
+
+    DDriveThread.join()
+
+    print 'end'
+
+

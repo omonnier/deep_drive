@@ -27,7 +27,8 @@
 export LD_LIBRARY_PATH="$(pwd)"
 #./mjpg_streamer -i "input_uvc.so --help"
 
-./mjpg_streamer -i "./input_uvc.so" -o "./output_http.so -w ./www"
+# change to 320x240 and set frame/s to 25 which is the defautl and only available setting
+./mjpg_streamer -i "./input_uvc.so -r 320x240 -f 25" -o "./output_http.so -w ./www -p 8000"
 #./mjpg_streamer -i "./input_uvc.so -d /dev/video0" -i "./input_uvc.so -d /dev/video1" -o "./output_http.so -w ./www"
 #valgrind ./mjpg_streamer -i "./input_uvc.so" -o "./output_http.so -w ./www"
 

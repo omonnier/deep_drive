@@ -9,7 +9,7 @@ from time import ctime          # Import necessary modules
 ctrl_cmd = ['forward', 'backward', 'left', 'right', 'stop', 'read cpu_temp', 'home', 'distance', 'x+', 'x-', 'y+', 'y-', 'xy_home']
 
 HOST = ''           # The variable of HOST is null, so the function bind( ) can be bound to all valid addresses.
-PORT = 21567
+PORT = 8001
 BUFSIZ = 1024       # Size of the buffer
 ADDR = (HOST, PORT)
 
