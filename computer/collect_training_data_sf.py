@@ -4,7 +4,8 @@ import cv2
 import pygame
 import urllib
 from pygame.locals import *
-from socket import * 
+from socket import *
+from datetime import datetime
 
 #### client to control sf car
 ctrl_cmd = ['forward', 'backward', 'left', 'right', 'stop', 'read cpu_temp', 'home', 'distance', 'x+', 'x-', 'y+', 'y-', 'xy_home']
@@ -16,7 +17,7 @@ ctrl_cmd = ['forward', 'backward', 'left', 'right', 'stop', 'read cpu_temp', 'ho
 HOST = '10.246.50.29'    # Server(Raspberry Pi) IP address
 #HOST = '169.254.77.149'    # Server(Raspberry Pi) IP address
 
-PORT = 21567
+PORT = 8001
 ADDR = (HOST, PORT)
 
 MIN_ANGLE    = -50
@@ -98,14 +99,14 @@ class CollectTrainingData(object):
         # collect images for training
         print 'Start collecting images...'
         e1 = cv2.getTickCount()
-        image_array = np.zeros((1, 38400), np.uint8)
-        label_array = np.zeros(1, np.uint8)
+        image_array = np.zeros((1, 38400), dtype=np.uint8)
+        label_array = np.zeros(1, dtype=np.uint8)
 
         key_input = pygame.key.get_pressed()
 
         # init car and speed
         print 'set Speed'
-        self.tcpCliSock.send('speed' + str(5))  # Send the speed data
+        self.tcpCliSock.send('speed' + str(20))  # Send the speed data
 
         # stream video frames one by one
         try:         
@@ -116,13 +117,24 @@ class CollectTrainingData(object):
             turn_angle = 0
             record = 0
 			
-            stream=urllib.urlopen('http://' + HOST + ':8080/?action=stream')
+            stream=urllib.urlopen('http://' + HOST + ':8000/?action=stream')
+            dt=datetime.now()
+            time1=dt.microsecond
             while self.send_inst:
                 bytes += stream.read(1024)
                 a = bytes.find('\xff\xd8')
                 b = bytes.find('\xff\xd9')
                 
                 if a!=-1 and b!=-1:
+
+                    #little check on frame received
+                    dt=datetime.now()                    
+                    #print "time1 = %.1f"%((dt.microsecond-time1) / 1000)
+                    time1=((dt.microsecond-time1) / 1000)
+                    if (time1 > 80):
+                        print "frame received later than expected = %.1f"%(time1)
+                    time1=dt.microsecond
+                    
                     jpg = bytes[a:b+2]
                     bytes = bytes[b+2:]
                     
@@ -139,95 +151,86 @@ class CollectTrainingData(object):
                     
                     # reshape the roi image into one row array
                     temp_array = roi.reshape(1, 38400).astype(np.uint8)
-                    
+
                     frame += 1
                     total_frame += 1                    
                     event_handled = 0
 
                     # receive new input from human driver
                     for event in pygame.event.get():
-						event_handled = 1
+                        event_handled = 1
 
-					# Check Key pressed
+                    # Check Key pressed
                     if event.type == KEYDOWN:
-						if event.key == K_x or event.key == K_q or event.key == K_a or event.key == K_ESCAPE:
-							print 'exit'
-							self.send_inst = False
-							self.sendSteerCommand('s')
-							break
+                        if event.key == K_x or event.key == K_q or event.key == K_a or event.key == K_ESCAPE:
+                            print 'exit'
+                            self.send_inst = False
+                            self.sendSteerCommand('s')
+                            break
                     
-						elif event.key == K_UP:
-							last_key_pressed = K_UP
-							saved_frame += 1
-							self.sendSteerCommand('f')
-							record = 1
+                        elif event.key == K_UP:
+                            last_key_pressed = K_UP
+                            saved_frame += 1
+                            self.sendSteerCommand('f')
+                            record = 1
                        
-						elif event.key == K_DOWN:
-							last_key_pressed = K_DOWN
-							saved_frame += 1
-							image_array = np.vstack((image_array, temp_array))
-							label_array = np.vstack((label_array, np.array([255])  ))
-							self.sendSteerCommand('s')
+                        elif event.key == K_DOWN:
+                            last_key_pressed = K_DOWN
+                            saved_frame += 1
+                            image_array = np.vstack((image_array, temp_array))
+                            label_array = np.vstack((label_array, np.array([255])  ))
+                            self.sendSteerCommand('s')
                     
-						elif event.key == K_RIGHT:
-							last_key_pressed = K_RIGHT
-							if (turn_angle < MAX_ANGLE ): 
-								turn_angle += STEP_CAPTURE
-							self.sendSteerCommand('turn=%d>' % (turn_angle) )
+                        elif event.key == K_RIGHT:
+                            last_key_pressed = K_RIGHT
+                            if (turn_angle < MAX_ANGLE ): 
+                                turn_angle += STEP_CAPTURE
+                            self.sendSteerCommand('turn=%d>' % (turn_angle) )
 
-						elif event.key == K_LEFT:
-							last_key_pressed = K_LEFT
-							if (turn_angle > MIN_ANGLE ):
-								turn_angle -= STEP_CAPTURE
-							self.sendSteerCommand('turn=%d>' % (turn_angle) )
-							
-					# In case there is an KEYUP event for Left/right
-					# Check if the other key is still down					
+                        elif event.key == K_LEFT:
+                            last_key_pressed = K_LEFT
+                            if (turn_angle > MIN_ANGLE ):
+                                turn_angle -= STEP_CAPTURE
+                            self.sendSteerCommand('turn=%d>' % (turn_angle) )
+                            
+                    # In case there is an KEYUP event for Left/right
+                    # Check if the other key is still down                  
                     elif event.type == KEYUP:
-							key_input = pygame.key.get_pressed()
-							if event.key == K_RIGHT:
-								if key_input[pygame.K_LEFT]:
-									last_key_pressed = K_LEFT
-								else:
-									last_key_pressed = 0
-									
-							elif event.key == K_LEFT:
-								if key_input[pygame.K_RIGHT]:
-									last_key_pressed = K_RIGHT
-								else:
-									last_key_pressed = 0
-
-							else:
-								last_key_pressed = 0
-
-
+                        key_input = pygame.key.get_pressed()
+                        if event.key == K_RIGHT:
+                            if key_input[pygame.K_LEFT]:
+                                last_key_pressed = K_LEFT
+                            else:
+                                last_key_pressed = 0
+                                
+                        elif event.key == K_LEFT:
+                            if key_input[pygame.K_RIGHT]:
+                                last_key_pressed = K_RIGHT
+                            else:
+                                last_key_pressed = 0
+                        else:
+                            last_key_pressed = 0
                     else:
-						last_key_pressed = 0
-						
-							
-							
-					# Turning specific handling.
-					
-					#  Key still down ==> Continue turning right/left
-					#  Key still up   ==> Continue goig back to home
+                        last_key_pressed = 0
+                          
+                    # Turning specific handling.        
+                    #  Key still down ==> Continue turning right/left
+                    #  Key still up   ==> Continue goig back to home
                     if event_handled == 0:
-						if (last_key_pressed == K_RIGHT):
-							if (turn_angle < MAX_ANGLE ): 
-								turn_angle += STEP_CAPTURE
-							self.sendSteerCommand('turn=%d>' % (turn_angle) )
+                        if (last_key_pressed == K_RIGHT):
+                            if (turn_angle < MAX_ANGLE ): 
+                                turn_angle += STEP_CAPTURE
+                            self.sendSteerCommand('turn=%d>' % (turn_angle) )
 
-						elif last_key_pressed == K_LEFT:
-							if (turn_angle > MIN_ANGLE ):
-								turn_angle -= STEP_CAPTURE
-							self.sendSteerCommand('turn=%d>' % (turn_angle) )
+                        elif last_key_pressed == K_LEFT:
+                            if (turn_angle > MIN_ANGLE ):
+                                turn_angle -= STEP_CAPTURE
+                            self.sendSteerCommand('turn=%d>' % (turn_angle) )
 
                     if (record == 1):
-						saved_frame += 1
-						image_array = np.vstack((image_array, temp_array))
-						label_array = np.vstack((label_array, np.array([turn_angle ])))
-
-								
-								
+                        saved_frame += 1
+                        image_array = np.vstack((image_array, temp_array))
+                        label_array = np.vstack((label_array, np.array([turn_angle ])))
 
             # Convert image in float
             image_array = np.asarray (image_array, np.float32)

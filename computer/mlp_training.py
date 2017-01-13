@@ -71,7 +71,6 @@ params = dict(term_crit = criteria,
                bp_dw_scale = 0.001,
                bp_moment_scale = 0.0 )
 
-
 print 'Training MLP ...'
 num_iter = model.train(train, train_labels, None, params = params)
 
