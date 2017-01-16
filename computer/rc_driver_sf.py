@@ -33,12 +33,12 @@ sensorClientEnable = True
 MIN_ANGLE    = -50
 MAX_ANGLE    = 50
 STEP_REPLAY  = 5
-NUMBER_OF_PREDICTION_TO_AVERAGE = 5
 
-#force the time of the loop in s
-LOOP_TIME = 0.04
+MAX_IMAGE_COUNT = 50
 
-NUMBER_OF_PREDICTION_TO_AVERAGE = 5
+#steering time for update in s
+STEERING_SAMPLING_TIME = 0.5
+
 
 # Number of NeuralNetwork output = 
 #  => (MAX - MIN) / STEP : Number of values except 0
@@ -96,8 +96,8 @@ class DeepDriveThread(threading.Thread):
         self.model = NeuralNetwork()
         self.model.create()
 
-        self.values_to_average  = np.zeros(NUMBER_OF_PREDICTION_TO_AVERAGE, dtype=np.int)
-        self.command_number = 0
+        self.values_to_average  = np.zeros(MAX_IMAGE_COUNT, dtype=np.int)
+        self.image_count = 0
 
 
     def ConnectClient(self):
@@ -150,7 +150,7 @@ class DeepDriveThread(threading.Thread):
                 
         #Send speed to car 
         print 'set Speed'
-        self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('SPEED',20)))
+        self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('SPEED',30)))
         #initial steer command set to stop
         try:
             print 'Start Main Thread for Deep Drive'
@@ -205,11 +205,12 @@ class DeepDriveThread(threading.Thread):
                         NNsteerCommand = self.model.predict(image_array)
 
                         # Average on 5 item
-                        self.command_number += 1
-                        self.values_to_average [self.command_number%NUMBER_OF_PREDICTION_TO_AVERAGE] = NNsteerCommand
-                        if self.command_number > 5:
-                            NNsteerCommand = np.sum (self.values_to_average, dtype=int) / NUMBER_OF_PREDICTION_TO_AVERAGE
-                            print self.values_to_average
+                        if NNsteerCommand != 0:
+                            self.image_count += 1
+                            if self.image_count < MAX_IMAGE_COUNT:
+                                self.values_to_average [self.image_count] = NNsteerCommand
+                            else:
+                                print ' out of image array '
 
                    
                     else:
@@ -245,8 +246,16 @@ class DeepDriveThread(threading.Thread):
 
                 #get time for steer command (Warning , the stack takes time so we redo get time here)
                 timeNow = time.time()
-                timeTarget = lastSteerTime + LOOP_TIME
+                timeTarget = lastSteerTime + STEERING_SAMPLING_TIME
                 if timeNow > timeTarget:
+                    #print self.values_to_average[0:self.image_count]
+                    if self.image_count > 0:
+                        NNsteerCommand = np.sum (self.values_to_average[0:self.image_count], dtype=int) / self.image_count
+                        print 'nbimage = ' + str(self.image_count) + ' , average_value = ' + str(NNsteerCommand)
+                        self.image_count = 0
+                    else:
+                        print 'Warning , No image during more than 1 s'
+                    
                     #it s time to updat steer command
                     if NNsteerCommand != 0:
                         self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('ANGLE_NN',NNsteerCommand)))
