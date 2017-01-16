@@ -6,6 +6,9 @@ import socket
 from ClientSocket import *
 
 
+MIN_ANGLE    = -50
+MAX_ANGLE    = 50
+STEP_REPLAY  = 5
 
 class SteerThread(threading.Thread):
     """ Implements the threading.Thread interface (start, join, etc.) and
@@ -76,16 +79,22 @@ class SteerThread(threading.Thread):
     def _handle_SEND(self, cmd):
         if cmd.data[0] is 'SPEED':
             self.socket.sendall('speed' + str(cmd.data[1]) + '>')
-
+            
         elif cmd.data[0] is 'STEER_COMMAND':
             self.socket.sendall(cmd.data[1] + '>')
                 
-        elif cmd.data[0] is 'ANGLE_NN'
-            angle = ((cmd.data[1] - 1 ) * STEP_REPLAY) - MAX_ANGLE
-	    command = 'turn=' + str(int(angle))+'>'
+        elif cmd.data[0] is 'ANGLE_NN':
+            print str(cmd.data[1])
+            angle = int((cmd.data[1] * STEP_REPLAY) - MAX_ANGLE)
+	    command = 'turn=' + str(angle) + '>'
             self.socket.sendall(command)
+            
+        elif cmd.data[0] is 'STEER_ANGLE':
+	    command = 'turn=' + str(cmd.data[1]) + '>'
+            self.socket.sendall(command)
+            
         else:
-            print 'Steer Command unknown'
+            print 'Steer Command unknown' + str()
 
         
     def _error_reply(self, errstr):

@@ -8,7 +8,6 @@ from ClientSocket import *
 from SteerSocket import *
 from VideoSocket import *
 from SensorSocket import *
-from datetime import datetime
 
 # distance data measured by ultrasonic sensor
 sensor_data = " "
@@ -16,7 +15,7 @@ sensor_data = " "
 #CAR_IP = '192.168.1.5'    # Server(Raspberry Pi) IP address
 #CAR_IP = '192.168.1.6'    # Server(Raspberry Pi) IP address
 #CAR_IP = '10.246.50.143'    # Server(Raspberry Pi) IP address
-CAR_IP = '10.246.50.153'    # Server(Raspberry Pi) IP address
+CAR_IP = '10.246.51.13'    # Server(Raspberry Pi) IP address
 
 PORT_VIDEO_SERVER = 8000
 PORT_STEER_SERVER = 8001
@@ -34,12 +33,18 @@ sensorClientEnable = True
 MIN_ANGLE    = -50
 MAX_ANGLE    = 50
 STEP_REPLAY  = 5
+NUMBER_OF_PREDICTION_TO_AVERAGE = 5
+
+#force the time of the loop in s
+LOOP_TIME = 0.04
+
+NUMBER_OF_PREDICTION_TO_AVERAGE = 5
 
 # Number of NeuralNetwork output = 
 #  => (MAX - MIN) / STEP : Number of values except 0
 #  =>  + 1 to handle angle = 0
 #  =>  + 1 to handle stop command
-number_output = (MAX_ANGLE - MIN_ANGLE) / STEP_REPLAY + 1 + 1
+number_output = (MAX_ANGLE - MIN_ANGLE) / STEP_REPLAY + 1
 
 ####################################### Neural Network definition ##############################
 
@@ -50,7 +55,7 @@ class NeuralNetwork(object):
         self.model = cv2.ANN_MLP()
 
     def create(self):
-        layer_size = np.int32([38400, 32, number_outpu])
+        layer_size = np.int32([38400, 32, number_output])
         self.model.create(layer_size)
         self.model.load('mlp_xml/mlp.xml')
 
@@ -90,6 +95,9 @@ class DeepDriveThread(threading.Thread):
         # create neural network
         self.model = NeuralNetwork()
         self.model.create()
+
+        self.values_to_average  = np.zeros(NUMBER_OF_PREDICTION_TO_AVERAGE, dtype=np.int)
+        self.command_number = 0
 
 
     def ConnectClient(self):
@@ -142,13 +150,10 @@ class DeepDriveThread(threading.Thread):
                 
         #Send speed to car 
         print 'set Speed'
-        self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('SPEED',30)))
+        self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('SPEED',20)))
         #initial steer command set to stop
-        NNsteerCommand = 3
-        oldSteerCommand = NNsteerCommand+1
         try:
             print 'Start Main Thread for Deep Drive'
-            time1=0
             
             #start receiver thread client to receive continuously data
             if videoClientEnable == True :
@@ -159,19 +164,20 @@ class DeepDriveThread(threading.Thread):
 
             #start car to be able to see additioanl data
             self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_COMMAND','forward')))
+
+            #init steer command to angle of 0 
+            NNsteerCommand = 10
+
+            lastSteerTime = time.time()
             while True:
+                time0=time.time()
                 
                 ############################# Manage IMAGE for Deep neural network to extract Steer Command ###############
                 try:
                     # try to see if image ready
-                    reply = self.sctVideoStream.reply_q.get(True,1)
+                    reply = self.sctVideoStream.reply_q.get(False)
                     if reply.type == ClientReply.SUCCESS:
-
-                        #little check on frame received
-                        dt=datetime.now()      
-                        #print "time1 = %.1f"%((dt.microsecond-time1) / 1000)
-                        time1 = dt.microsecond
-                            
+                
                         #check if we want to stop autonomous driving
                         if cv2.waitKey(1) & 0xFF == ord('q'):
                             break
@@ -183,7 +189,7 @@ class DeepDriveThread(threading.Thread):
                         image = cv2.imdecode(np.fromstring(self.sctVideoStream.lastImage, dtype=np.uint8),cv2.CV_LOAD_IMAGE_GRAYSCALE)
 
                         # lower half of the image
-                        half_gray = image[0:120,:]
+                        half_gray = image[120:240,:]
 
                         #cv2.imshow('image', image)
                         cv2.imshow('mlp_image', half_gray)
@@ -197,6 +203,14 @@ class DeepDriveThread(threading.Thread):
 
                         # neural network makes prediction
                         NNsteerCommand = self.model.predict(image_array)
+
+                        # Average on 5 item
+                        self.command_number += 1
+                        self.values_to_average [self.command_number%NUMBER_OF_PREDICTION_TO_AVERAGE] = NNsteerCommand
+                        if self.command_number > 5:
+                            NNsteerCommand = np.sum (self.values_to_average, dtype=int) / NUMBER_OF_PREDICTION_TO_AVERAGE
+                            print self.values_to_average
+
                    
                     else:
                         print 'Error getting image :' + str(reply.data)
@@ -228,15 +242,22 @@ class DeepDriveThread(threading.Thread):
 
 
                 ############### Control Car with all the input we can have ####################
-                
-                # for the moment we just have DNN prediction :
-                if oldSteerCommand != NNsteerCommand :
-                    self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_NN',NNsteerCommand)))
-                    oldSteerCommand = NNsteerCommand
-                
+
+                #get time for steer command (Warning , the stack takes time so we redo get time here)
+                timeNow = time.time()
+                timeTarget = lastSteerTime + LOOP_TIME
+                if timeNow > timeTarget:
+                    #it s time to updat steer command
+                    if NNsteerCommand != 0:
+                        self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('ANGLE_NN',NNsteerCommand)))
+                    lastSteerTime = timeNow
+                    print 'NNCommand = ',NNsteerCommand
                 
         finally:
+            print 'end rc driver'
             #stop and close all client and close them
+            self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_COMMAND','stop')))
+            self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_COMMAND','home')))
             self.sctVideoStream.cmd_q.put(ClientCommand(ClientCommand.STOP))
             self.sctVideoStream.cmd_q.put(ClientCommand(ClientCommand.CLOSE))
             self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.STOP))
@@ -249,7 +270,8 @@ class DeepDriveThread(threading.Thread):
             self.sctVideoStream.join()
             self.sctSteer.join()
             self.sctSensor.join()
-              
+            print 'end finally'
+            
 if __name__ == '__main__':
     #create Deep drive thread and strt
     DDriveThread = DeepDriveThread()
@@ -259,7 +281,6 @@ if __name__ == '__main__':
     DDriveThread.start()
 
     DDriveThread.join()
-
     print 'end'
 
 

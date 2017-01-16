@@ -7,14 +7,14 @@ MIN_ANGLE    = -50
 MAX_ANGLE    = 50
 
 # STEP_CAPTURE should always be lower than STEP_REPLAY 
-STEP_CAPTURE = 2
+STEP_CAPTURE = 1
 STEP_REPLAY  = 5
 
 # Number of NeuralNetwork output = 
 #  => (MAX - MIN) / STEP : Number of values except 0
-#  =>  + 1 to handle angle = 0
-#  =>  + 1 to handle stop command
-number_output = (MAX_ANGLE - MIN_ANGLE) / STEP_REPLAY + 1 + 1
+# + 1 to take into account boundary or 0
+number_output = (MAX_ANGLE - MIN_ANGLE) / STEP_REPLAY + 1
+
 
 print 'Loading training data...'
 e0 = cv2.getTickCount()
@@ -24,6 +24,9 @@ image_array  = np.zeros((1, 38400), dtype=np.float32)
 angle_array  = np.zeros(1, dtype=np.uint8)
 train_labels = np.zeros((0, number_output), dtype=np.float32)
 eye_array    = np.eye  (number_output, dtype=np.float32)
+
+print 'number of output layer = ' + str(number_output)
+
 
 training_data = glob.glob('training_data/*.npz')
 
@@ -40,11 +43,8 @@ for single_npz in training_data:
 
 # Build training labels from 0 .. N  based on angle_array
 for angle in angle_array:
-	if (angle == 255):
-		angle = 0
-	else:
-		angle = int (round((((angle + MAX_ANGLE) / STEP_REPLAY ) + 1),0))
-	train_labels = np.vstack ((train_labels, eye_array[angle]))
+    angle = int (round((((angle + MAX_ANGLE) / STEP_REPLAY )),0))
+    train_labels = np.vstack ((train_labels, eye_array[angle]))
 
 # Remove first element. 
 train = image_array[1:, :]

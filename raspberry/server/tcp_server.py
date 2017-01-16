@@ -41,9 +41,13 @@ while True:
     print '...connected from :', addr     # Print the IP address of the client connected with the server.
 
     while True:
-        data = ''
+        data_received = ''
         data_received = tcpCliSock.recv(BUFSIZ)    # Receive data sent from the client. 
         data_list = re.split(">", data_received)
+
+        if not data_received:
+            #stop and return in waiting for a new connection
+            break
         
         for data in data_list:
             # Analyze the command received and control the car accordingly.

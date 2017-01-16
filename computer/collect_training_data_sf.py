@@ -14,7 +14,7 @@ ctrl_cmd = ['forward', 'backward', 'left', 'right', 'stop', 'read cpu_temp', 'ho
 #HOST = '192.168.1.5'    # Server(Raspberry Pi) IP address
 #HOST = '192.168.1.6'    # Server(Raspberry Pi) IP address
 #HOST = '10.246.50.143'    # Server(Raspberry Pi) IP address
-HOST = '10.246.50.29'    # Server(Raspberry Pi) IP address
+HOST = '10.246.50.153'    # Server(Raspberry Pi) IP address
 #HOST = '169.254.77.149'    # Server(Raspberry Pi) IP address
 
 PORT = 8001
@@ -106,7 +106,7 @@ class CollectTrainingData(object):
 
         # init car and speed
         print 'set Speed'
-        self.tcpCliSock.send('speed' + str(20))  # Send the speed data
+        self.tcpCliSock.send('speed' + str(30))  # Send the speed data
 
         # stream video frames one by one
         try:         
@@ -141,7 +141,7 @@ class CollectTrainingData(object):
                     i = cv2.imdecode(np.fromstring(jpg, dtype=np.uint8),cv2.CV_LOAD_IMAGE_GRAYSCALE)
                     
                     # select highest half of the image vertical (120/240) and half image horizontal
-                    roi = i[0:120,:]
+                    roi = i[120:240,:]
                     
                     # save streamed images
                     #cv2.imwrite('training_images/frame{:>05}.jpg'.format(frame), i)
@@ -232,6 +232,7 @@ class CollectTrainingData(object):
                         image_array = np.vstack((image_array, temp_array))
                         label_array = np.vstack((label_array, np.array([turn_angle ])))
 
+
             # Convert image in float
             image_array = np.asarray (image_array, np.float32)
 
@@ -241,6 +242,7 @@ class CollectTrainingData(object):
 
             # save training data as a numpy file
             np.savez('training_data_temp/test08.npz', train=train, train_labels=train_labels)
+
 
             e2 = cv2.getTickCount()
             # calculate streaming duration
