@@ -14,7 +14,7 @@ sensor_data = " "
 #HOST = '192.168.1.5'    # Server(Raspberry Pi) IP address
 #HOST = '192.168.1.6'    # Server(Raspberry Pi) IP address
 #HOST = '10.246.50.143'    # Server(Raspberry Pi) IP address
-HOST = '10.246.50.29'    # Server(Raspberry Pi) IP address
+HOST = '10.246.51.53'    # Server(Raspberry Pi) IP address
 PORT = 21567
 ADDR = (HOST, PORT)
 
@@ -29,6 +29,8 @@ STEP_REPLAY  = 5
 #  =>  + 1 to handle stop command
 number_output = (MAX_ANGLE - MIN_ANGLE) / STEP_REPLAY + 1 + 1
 
+# Number of command to average to compute angle
+NUMBER_OF_PREDICTION_TO_AVERAGE = 5
 
 class NeuralNetwork(object):
 
@@ -59,6 +61,8 @@ class RCControl(object):
         self.tcpCliSock.send('speed' + str(self.speed))  # Send the speed data
         self.oldSteerCommand = 's'
         self.direction = 'none'
+        self.values_to_average  = np.zeros(5, dtype=np.int)
+        self.command_number = 0
 
     def sendSteerCommand(self,command):
         
@@ -105,9 +109,16 @@ class RCControl(object):
             #self.sendSteerCommand('s')
             
         else:
-			angle = ((prediction - 1 ) * STEP_REPLAY) - MAX_ANGLE
-			command = 'turn=' + str(int(angle))+'>'
-			self.sendSteerCommand(command)
+            # Average on 5 item
+            self.command_number += 1
+            print 'Prediction = ' + str(prediction)
+            angle = ((prediction - 1 ) * STEP_REPLAY) - MAX_ANGLE
+            self.values_to_average [self.command_number%NUMBER_OF_PREDICTION_TO_AVERAGE] = angle
+            if self.command_number > 5:
+                angle = np.sum (self.values_to_average, dtype=int) / NUMBER_OF_PREDICTION_TO_AVERAGE
+                print self.values_to_average
+                command = 'turn=' + str(int(angle))+'>'
+                self.sendSteerCommand(command)
    
     def stop(self):
         print("stop test")
@@ -282,12 +293,10 @@ class VideoStreamHandler(object):
                 
                 # Convert image in float 
                 image_array = np.asarray (image_array, np.float32)
-                print image_array;
 				
                 # neural network makes prediction
                 prediction = model.predict(image_array)
-                print "Pred = " + str(prediction)
-				
+		
                 ############### TO BE REMOVE WHEN OBJ DETECTION ENABLE ####################
                 rc_car.steer(prediction)
 
