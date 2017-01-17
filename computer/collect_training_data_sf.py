@@ -126,10 +126,11 @@ class CollectTrainingData(threading.Thread):
         total_frame = 0
         turn_angle = 0
         totalAngle = 0
+        lastTotalAngle = 0
             
         #Send speed to car 
         print 'set Speed'
-        self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('SPEED',20)))
+        self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('SPEED',25)))
         #initial steer command set to stop
         self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_ANGLE',0)))
 
@@ -144,6 +145,8 @@ class CollectTrainingData(threading.Thread):
         #pygame.display.iconify()
 
         key_input = pygame.key.get_pressed()
+
+        totalRecordTime=0
 
         # stream video frames one by one
         try:         
@@ -201,61 +204,83 @@ class CollectTrainingData(threading.Thread):
                 #time.sleep(0.01)
                 ############################# Receive input key from human driver ######################
                 turn_angle = 0
+                
+                event_handled = 0
+                event = 0
                 # receive new input from human driver
                 for event in pygame.event.get():
                     event_handled = 1
-
-                # Check Key pressed
-                if event.type == KEYDOWN:
-                    if event.key == K_x or event.key == K_q or event.key == K_a or event.key == K_ESCAPE:
-                        print 'exit'
-                        self.send_inst = False
-                        self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_COMMAND','stop')))
-                        break
-                
-                    elif event.key == K_UP:
-                        last_key_pressed = K_UP
-                        self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_COMMAND','forward')))
-                        record = 1
-                        recordTime = time.time()
-                   
-                    elif event.key == K_DOWN:
-                        last_key_pressed = K_DOWN
-                        self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_COMMAND','stop')))
-                
-                    elif event.key == K_RIGHT:
-                        last_key_pressed = K_RIGHT
-                        turn_angle = STEP_CAPTURE
-
-                    elif event.key == K_LEFT:
-                        last_key_pressed = K_LEFT
-                        turn_angle = -STEP_CAPTURE
-                        
-                # In case there is an KEYUP event for Left/right
-                # Check if the other key is still down                  
-                elif event.type == KEYUP:
-                    key_input = pygame.key.get_pressed()
-                    if event.key == K_RIGHT:
-                        if key_input[pygame.K_LEFT]:
-                            last_key_pressed = K_LEFT
-                            turn_angle = -STEP_CAPTURE
-                        else:
-                            last_key_pressed = 0
-                            turn_angle = 0
-                            
-                    elif event.key == K_LEFT:
-                        if key_input[pygame.K_RIGHT]:
+                if event_handled == 1:
+                    # Check Key pressed
+                    if event.type == KEYDOWN:
+                        if event.key == K_x or event.key == K_q or event.key == K_a or event.key == K_ESCAPE:
+                            print 'exit'
+                            self.send_inst = False
+                            record = 0
+                            self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_COMMAND','stop')))
+                            break
+                    
+                        elif event.key == K_UP:
+                            last_key_pressed = K_UP
+                            self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_COMMAND','forward')))
+                            record = 1
+                            recordTime = time.time()
+                       
+                        elif event.key == K_DOWN:
+                            last_key_pressed = K_DOWN
+                            self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_COMMAND','stop')))
+                    
+                        elif event.key == K_RIGHT:
                             last_key_pressed = K_RIGHT
                             turn_angle = STEP_CAPTURE
+
+                        elif event.key == K_LEFT:
+                            last_key_pressed = K_LEFT
+                            turn_angle = -STEP_CAPTURE
+
+                        elif event.key == K_SPACE:
+                            last_key_pressed = K_SPACE
+                            record = 1
+                            recordTime = time.time()
+                            
+
+                            
+                    # In case there is an KEYUP event for Left/right
+                    # Check if the other key is still down                  
+                    elif event.type == KEYUP:
+                        key_input = pygame.key.get_pressed()
+                        if event.key == K_RIGHT:
+                            if key_input[pygame.K_LEFT]:
+                                last_key_pressed = K_LEFT
+                                turn_angle = -STEP_CAPTURE
+                            else:
+                                last_key_pressed = 0
+                                turn_angle = 0
+                                
+                        elif event.key == K_LEFT:
+                            if key_input[pygame.K_RIGHT]:
+                                last_key_pressed = K_RIGHT
+                                turn_angle = STEP_CAPTURE
+                            else:
+                                last_key_pressed = 0
+                                turn_angle = 0
+                                
+                        elif event.key == K_SPACE:
+                            record = 0
+                            totalRecordTime += time.time() - recordTime
+                            last_key_pressed = 0
+
+                        elif event.key == K_DOWN:
+                            record = 0
+                            last_key_pressed = 0
+                            totalRecordTime += time.time() - recordTime
+                            
                         else:
                             last_key_pressed = 0
                             turn_angle = 0
                     else:
                         last_key_pressed = 0
                         turn_angle = 0
-                else:
-                    last_key_pressed = 0
-                    turn_angle = 0
                       
                 # Turning specific handling.        
                 #  Key still down ==> Continue turning right/left
@@ -290,7 +315,9 @@ class CollectTrainingData(threading.Thread):
                         totalAngle = MIN_ANGLE                        
                     self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_ANGLE',totalAngle)))
                     lastSteerTime = timeNow
-                    print 'turn_angle = ',totalAngle
+                    if lastTotalAngle != totalAngle:
+                        print 'turn_angle = ',totalAngle
+                        lastTotalAngle = totalAngle
                 
             
             # Convert image in float
@@ -309,11 +336,10 @@ class CollectTrainingData(threading.Thread):
             time0 = (e2 - e1) / cv2.getTickFrequency()
             print 'Streaming duration:', time0
 
-            recordTime = time.time() - recordTime
             print(train.shape)
             print(train_labels.shape)
             print 'Total frame:', total_frame
-            print 'Saved frame:', saved_frame , ' in ', recordTime, ' seconds'
+            print 'Saved frame:', saved_frame , ' in ', totalRecordTime, ' seconds'
             print 'Dropped frame', total_frame - saved_frame
 
         finally:
