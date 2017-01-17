@@ -1,0 +1,9 @@
+# Ignore python compiled files
+*.pyc
+
+# Ignore .old  .bak
+*.bak
+*.old 
+
+# Ignore training_data_temp folder
+training_data_temp/
