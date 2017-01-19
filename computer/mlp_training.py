@@ -1,19 +1,7 @@
-
 import cv2
 import numpy as np
 import glob
-
-MIN_ANGLE    = -50
-MAX_ANGLE    = 50
-
-# STEP_CAPTURE should always be lower than STEP_REPLAY 
-STEP_CAPTURE = 1
-STEP_REPLAY  = 5
-
-# Number of NeuralNetwork output = 
-#  => (MAX - MIN) / STEP : Number of values except 0
-# + 1 to take into account boundary or 0
-number_output = (MAX_ANGLE - MIN_ANGLE) / STEP_REPLAY + 1
+from commonDeepDriveDefine import *
 
 
 print 'Loading training data...'
@@ -22,10 +10,10 @@ e0 = cv2.getTickCount()
 # load training data
 image_array  = np.zeros((1, 38400), dtype=np.float32)
 angle_array  = np.zeros(1, dtype=np.uint8)
-train_labels = np.zeros((0, number_output), dtype=np.float32)
-eye_array    = np.eye  (number_output, dtype=np.float32)
+train_labels = np.zeros((0, NN_OUTPUT_NUMBER), dtype=np.float32)
+eye_array    = np.eye  (NN_OUTPUT_NUMBER, dtype=np.float32)
 
-print 'number of output layer = ' + str(number_output)
+print 'number of output layer = ' + str(NN_OUTPUT_NUMBER)
 
 
 training_data = glob.glob('training_data/*.npz')
@@ -61,7 +49,7 @@ print 'Loading image duration:', time0
 e1 = cv2.getTickCount()
 
 # create MLP
-layer_sizes = np.int32([38400, 32, number_output])
+layer_sizes = np.int32([38400, 32, NN_OUTPUT_NUMBER])
 model = cv2.ANN_MLP()
 model.create(layer_sizes)
 criteria = (cv2.TERM_CRITERIA_COUNT | cv2.TERM_CRITERIA_EPS, 500, 0.0001)
