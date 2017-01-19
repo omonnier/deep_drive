@@ -3,7 +3,7 @@ import urllib
 import Queue
 import struct
 import socket
-from ClientSocket import *
+from commonDeepDriveDefine import *
 
 
 

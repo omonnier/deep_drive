@@ -4,48 +4,12 @@ import math
 import threading
 import Queue
 import time
-from ClientSocket import *
-from SteerSocket import *
-from VideoSocket import *
-from SensorSocket import *
-from datetime import datetime
-import pygame
-from pygame.locals import *
+from commonDeepDriveDefine import *
+from KeyboardThread import *
+from SteerThread import *
+from VideoThread import *
+from SensorThread import *
 
-
-
-# distance data measured by ultrasonic sensor
-sensor_data = " "
-
-#CAR_IP = '192.168.1.5'    # Server(Raspberry Pi) IP address
-#CAR_IP = '192.168.1.6'    # Server(Raspberry Pi) IP address
-#CAR_IP = '10.246.50.143'    # Server(Raspberry Pi) IP address
-CAR_IP = '10.246.51.13'    # Server(Raspberry Pi) IP address
-
-PORT_VIDEO_SERVER = 8000
-PORT_STEER_SERVER = 8001
-PORT_SENSOR_SERVER = 8002
-ADDR_VIDEO_SERVER = (CAR_IP, PORT_VIDEO_SERVER)
-ADDR_STEER_SERVER = (CAR_IP, PORT_STEER_SERVER)
-ADDR_SENSOR_SERVER = (CAR_IP, PORT_SENSOR_SERVER)
-
-#client to enable
-videoClientEnable = True
-steerClientEnable = True
-sensorClientEnable = False
-
-MIN_ANGLE    = -50
-MAX_ANGLE    = 50
-
-# STEP_CAPTURE is the minimal step we send to the car 
-STEP_CAPTURE = 1
-
-turning_offset = 0
-#sampling of the main loop in s
-LOOP_TIME = 0.04
-
-#sampling of the image into vstack array (FPS record)
-FPS_RECORD_TIME = 0.1
 
 class CollectTrainingData(threading.Thread):
     
@@ -68,6 +32,11 @@ class CollectTrainingData(threading.Thread):
         self.sctSensor = SensorThread()
         self.sctSensor.name = 'SensorSocketThread'
         self.sctSensor.start()
+
+        #create Keyboard Thread
+        self.keyboardThread = keyboardThread()
+        self.keyboardThread.name = 'keyboardThread'
+        self.keyboardThread.start()
         
         #connect All client
         self.ConnectClient()
@@ -119,42 +88,33 @@ class CollectTrainingData(threading.Thread):
                     print 'Sensor Client not connected'
             
 
-
     def run(self):
         
         saved_frame = 0
         total_frame = 0
+        lastTotalAngle = 0
+        totalRecordTime=0
+        frame = 1
+        record = 0
+        bytes=''
         turn_angle = 0
         totalAngle = 0
-        lastTotalAngle = 0
+        lastkeypressed = 0
+        recordTime = 0
+        totalRecordTime = 0
+                     
             
         #Send speed to car 
-        print 'set Speed'
-        self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('SPEED',25)))
+        print 'Enter main thread to collect data'
+        self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('SPEED',28)))
         #initial steer command set to stop
         self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_ANGLE',0)))
-
         
-        e1 = cv2.getTickCount()
         image_array = np.zeros((1, 38400), dtype=np.uint8)
         label_array = np.zeros(1, dtype=np.uint8)
 
-        pygame.init()
-        # use the window ygame to enter direction
-        screen = pygame.display.set_mode((400,300))
-        #pygame.display.iconify()
-
-        key_input = pygame.key.get_pressed()
-
-        totalRecordTime=0
-
         # stream video frames one by one
         try:         
-            bytes=''
-            frame = 1
-            next_turn = 0
-            last_key_pressed = 0
-            record = 0
 
             print 'Start Main Thread to collect image'
             
@@ -165,13 +125,17 @@ class CollectTrainingData(threading.Thread):
             if sensorClientEnable == True :
                  self.sctSensor.cmd_q.put(ClientCommand(ClientCommand.RECEIVE,''))
 
+            #start keyboard thread to get keyboard inut
+            self.keyboardThread.cmd_q.put(ClientCommand(ClientCommand.RECEIVE,''))
+
             #init time
             lastFrameTime = time.time()
             lastSteerTime = lastFrameTime
-            
+
+
+
             while True:
                 try:
-                    time0=time.time()
                     # check queue success for image ready
                     reply = self.sctVideoStream.reply_q.get(False)
                     if reply.type == ClientReply.SUCCESS:
@@ -185,6 +149,10 @@ class CollectTrainingData(threading.Thread):
                         
                         cv2.imshow('roi_image', roi)
                         #cv2.imshow('image', i)
+
+                        #check if we want to stop autonomous driving
+                        if cv2.waitKey(1) & 0xFF == ord('q'):
+                            break
                         
                         # reshape the roi image into one row array
                         temp_array = roi.reshape(1, 38400).astype(np.uint8)
@@ -201,113 +169,83 @@ class CollectTrainingData(threading.Thread):
                     #queue empty most of the time because image not ready
                     pass
 
-                #time.sleep(0.01)
-                ############################# Receive input key from human driver ######################
-                turn_angle = 0
-                
-                event_handled = 0
-                event = 0
-                # receive new input from human driver
-                for event in pygame.event.get():
-                    event_handled = 1
-                if event_handled == 1:
-                    # Check Key pressed
-                    if event.type == KEYDOWN:
-                        if event.key == K_x or event.key == K_q or event.key == K_a or event.key == K_ESCAPE:
-                            print 'exit'
-                            self.send_inst = False
+                ######################## Get control from the keyboard if any #########################
+                try:
+                    # keyboard queue filled ?
+                    reply = self.keyboardThread.reply_q.get(False)
+                    if reply.type == ClientReply.SUCCESS:
+                        #new keyboard input found
+                        keyPressed = reply.data
+                        print 'key Pressed = ' , keyPressed
+                        
+                        if keyPressed == 'exit':
                             record = 0
-                            self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_COMMAND','stop')))
+                            turn_angle = 0
+                            if recordTime != 0:
+                                totalRecordTime += (time.time() - recordTime)
+                            #get out of the loop
                             break
-                    
-                        elif event.key == K_UP:
-                            last_key_pressed = K_UP
-                            self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_COMMAND','forward')))
-                            record = 1
-                            recordTime = time.time()
-                       
-                        elif event.key == K_DOWN:
-                            last_key_pressed = K_DOWN
-                            self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_COMMAND','stop')))
-                    
-                        elif event.key == K_RIGHT:
-                            last_key_pressed = K_RIGHT
+                        
+                        elif keyPressed == 'right':
                             turn_angle = STEP_CAPTURE
-
-                        elif event.key == K_LEFT:
-                            last_key_pressed = K_LEFT
+                            
+                        elif keyPressed == 'left':
                             turn_angle = -STEP_CAPTURE
 
-                        elif event.key == K_SPACE:
-                            last_key_pressed = K_SPACE
+                        elif keyPressed == 'up':
                             record = 1
-                            recordTime = time.time()
-                            
+                            self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_COMMAND','forward')))
 
-                            
-                    # In case there is an KEYUP event for Left/right
-                    # Check if the other key is still down                  
-                    elif event.type == KEYUP:
-                        key_input = pygame.key.get_pressed()
-                        if event.key == K_RIGHT:
-                            if key_input[pygame.K_LEFT]:
-                                last_key_pressed = K_LEFT
-                                turn_angle = -STEP_CAPTURE
-                            else:
-                                last_key_pressed = 0
-                                turn_angle = 0
-                                
-                        elif event.key == K_LEFT:
-                            if key_input[pygame.K_RIGHT]:
-                                last_key_pressed = K_RIGHT
-                                turn_angle = STEP_CAPTURE
-                            else:
-                                last_key_pressed = 0
-                                turn_angle = 0
-                                
-                        elif event.key == K_SPACE:
+                        elif keyPressed == 'down':
                             record = 0
-                            totalRecordTime += time.time() - recordTime
-                            last_key_pressed = 0
-
-                        elif event.key == K_DOWN:
-                            record = 0
-                            last_key_pressed = 0
-                            totalRecordTime += time.time() - recordTime
-                            
-                        else:
-                            last_key_pressed = 0
+                            self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_COMMAND','stop')))
                             turn_angle = 0
+                            
+                        elif keyPressed == 'space':
+                            record = 1
+                            
+                        elif keyPressed == 'none':
+                            turn_angle = 0
+                            if lastkeypressed == 'space':
+                                #this was a free space record then we canstop record
+                                record = 0                                                         
+                        else :
+                            #none expeted key is pressed
+                            print 'Error , another key seems to exist ???'
+                            
+                        # record lastkey that can be use for consecutive command action
+                        lastkeypressed = keyPressed
+                            
                     else:
-                        last_key_pressed = 0
-                        turn_angle = 0
-                      
-                # Turning specific handling.        
-                #  Key still down ==> Continue turning right/left
-                #  Key still up   ==> Continue goig back to home
-                if event_handled == 0:
-                    if (last_key_pressed == K_RIGHT):
-                        turn_angle = STEP_CAPTURE
-
-                    elif last_key_pressed == K_LEFT:
-                        turn_angle = -STEP_CAPTURE
-
-                #get time for steer command
+                        print 'Error getting keyboard input :' + str(reply.data)
+                        break             
+                except Queue.Empty:
+                    #queue empty most of the time because keyboard not hit
+                    pass
+                
+                #See now if we have to record or not the frame into vstack memory
                 timeNow = time.time()
-                timeTarget = lastFrameTime + FPS_RECORD_TIME
                 if (record == 1):
+                    #start recording time
+                    if recordTime == 0:
+                        recordTime = time.time()
+                    
                     #check if this is time to record a frame
-                    if  timeNow > timeTarget:
+                    if  timeNow > (lastFrameTime + FPS_RECORD_TIME):
                         saved_frame += 1
                         image_array = np.vstack((image_array, temp_array))
                         label_array = np.vstack((label_array, np.array([totalAngle])))
                         lastFrameTime = timeNow
+                else:
+                    #record the time if recorTime exist
+                    if recordTime != 0:
+                        totalRecordTime += (time.time() - recordTime)
+                        recordTime = 0
 
-                #get time for steer command (Warning , the stack takes time so we redo get time here)
+                #get time for steer command and apply it if done
                 timeNow = time.time()
-                timeTarget = lastSteerTime + LOOP_TIME
-                if timeNow > timeTarget:
-                    #it s time to updat steer command
+                if timeNow > (lastSteerTime + STEERING_KEYBOARD_SAMPLING_TIME):
+                    #it s time to update steer command
                     totalAngle += turn_angle
                     if totalAngle >= MAX_ANGLE:
                         totalAngle = MAX_ANGLE
@@ -319,46 +257,42 @@ class CollectTrainingData(threading.Thread):
                         print 'turn_angle = ',totalAngle
                         lastTotalAngle = totalAngle
                 
-            
-            # Convert image in float
-            image_array = np.asarray (image_array, np.float32)
+            if totalRecordTime !=0:            
+                # Convert image in float
+                image_array = np.asarray (image_array, np.float32)
 
-            # save training images and labels
-            train = image_array[1:, :]
-            train_labels = label_array[1:, :]
+                # save training images and labels
+                train = image_array[1:, :]
+                train_labels = label_array[1:, :]
 
-            # save training data as a numpy file
-            np.savez('training_data_temp/test08.npz', train=train, train_labels=train_labels)
+                # save training data as a numpy file
+                np.savez('training_data_temp/test08.npz', train=train, train_labels=train_labels)
 
+                print(train.shape)
+                print(train_labels.shape)
+                print 'Total frame:', total_frame
+                print 'Saved frame:', saved_frame , ' in ', totalRecordTime, ' seconds'
+                print 'Dropped frame', total_frame - saved_frame
 
-            e2 = cv2.getTickCount()
-            # calculate streaming duration
-            time0 = (e2 - e1) / cv2.getTickFrequency()
-            print 'Streaming duration:', time0
-
-            print(train.shape)
-            print(train_labels.shape)
-            print 'Total frame:', total_frame
-            print 'Saved frame:', saved_frame , ' in ', totalRecordTime, ' seconds'
-            print 'Dropped frame', total_frame - saved_frame
-
+        
         finally:
-            #stop and close all client and close them
-            self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_ANGLE',0)))
-            
-            self.sctVideoStream.cmd_q.put(ClientCommand(ClientCommand.STOP))
-            self.sctVideoStream.cmd_q.put(ClientCommand(ClientCommand.CLOSE))
-            self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.STOP))
-            self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.CLOSE))
-            self.sctSensor.cmd_q.put(ClientCommand(ClientCommand.STOP))
-            self.sctSensor.cmd_q.put(ClientCommand(ClientCommand.CLOSE))
-            #let 1 second for process to close
-            time.sleep(1)
-            #and make sure all of them ended properly
-            self.sctVideoStream.join()
-            self.sctSteer.join()
-            self.sctSensor.join()
-
+                #stop and close all client and close them
+                self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_ANGLE',0)))
+                
+                self.sctVideoStream.cmd_q.put(ClientCommand(ClientCommand.STOP))
+                self.sctVideoStream.cmd_q.put(ClientCommand(ClientCommand.CLOSE))
+                self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.STOP))
+                self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.CLOSE))
+                self.sctSensor.cmd_q.put(ClientCommand(ClientCommand.STOP))
+                self.sctSensor.cmd_q.put(ClientCommand(ClientCommand.CLOSE))
+                self.keyboardThread.cmd_q.put(ClientCommand(ClientCommand.STOP))
+                self.keyboardThread.cmd_q.put(ClientCommand(ClientCommand.CLOSE))
+                #let 1 second for process to close
+                time.sleep(2)
+                self.sctVideoStream.join()
+                self.sctSteer.join()
+                self.sctSensor.join()
+                self.keyboardThread.join()
 
 if __name__ == '__main__':
 
