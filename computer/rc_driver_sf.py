@@ -9,46 +9,92 @@ from KeyboardThread import *
 from SteerThread import *
 from VideoThread import *
 from SensorThread import *
-
+from keras.models import load_model
+from sklearn.externals import joblib
 
 ####################################### Neural Network definition ##############################
 
 
 class NeuralNetwork(object):
 
-    def __init__(self):
-        self.model = cv2.ANN_MLP()
-
-    def create(self):
-        layer_size = np.int32([38400, 32, NN_OUTPUT_NUMBER])
-        self.model.create(layer_size)
-        self.model.load('mlp_xml/mlp.xml')
+    def __init__(self, filename):
+        self.model = load_model(fileName)
+        self.scaler = Scaler('keras_model/scaler.pkl')
 
     def predict(self, samples):
-        ret, resp = self.model.predict(samples)
-        return resp.argmax(-1)
+        scaled_values = self.scaler.X_scaling(samples, 1)
+        # reshape to image for CNN input
+        scaled_values = scaled_values.reshape(1, 1, ROWS, COLS)
+        predict = self.model.predict(scaled_values)
+        predict = self.scaler.Y_inverse_scaling(predict, samples.shape[1])
+        # predict.shape is (1, 1). Returning the value only
+        # Do we need to convert to signed int ?
+        return predict[0][0]
+
+
+class Scaler(object):
+
+    def __init__(self, fileName):
+        """
+        @param filename: a filename pointing to a scaler object, implementing
+            the transform() and inverse_transform() methods
+            as for the scikit-learn StandardScaler.
+            The scaler must expects the inputs in the [X, Y] order
+            (Y placed at the end)
+        """
+        self.scaler = joblib.load(fileName)
+
+    def X_scaling(self, xvalues, ysize):
+        """
+        @param xvalues: the X values to scale with transform() method
+        @type xvalues: array of shape (m, n)
+        @param ysize: the number of Y outputs (columns)
+        @type ysize: int
+        @return the X values scaled
+        @rtype: array of shape (m, n)
+        """
+        # add dummy y values
+        values = np.concatenate((xvalues, np.zeros((xvalues.shape[0], ysize))), axis=1)
+        scaled_values = self.scaler.transform(np.array(values).reshape(1, -1))
+        # remove y scaled values
+        return scaled_values[:, :-ysize]
+
+
+    def Y_inverse_scaling(self, yvalues, xsize):
+        """
+        @param yvalues: the Y values to inverse scale with inverse_transform() method
+        @type yvalues: array of shape (m, n)
+        @param xsize: the number of X features (columns)
+        @type xsize: int
+        @return the Y values inverse scaled
+        @rtype: array of shape (m, n)
+        """
+        # add dummy X values
+        values = np.concatenate((np.zeros((yvalues.shape[0], xsize)), yvalues), axis=1)
+        inv_scaled_values = self.scaler.inverse_transform(values)
+        return inv_scaled_values[:, xsize:]
 
 
 ####################################### Deep Drive Thread ##############################
 
 class DeepDriveThread(threading.Thread):
-    
+
     def __init__(self):
         #call init
         threading.Thread.__init__(self)
-        
+
         #create Video Stream Client Thread
         self.sctVideoStream = VideoThread()
         self.sctVideoStream.name = 'VideoSocketThread'
         self.sctVideoStream.start()
-        
+
 
         #create Steer Client Thread
         self.sctSteer = SteerThread()
         self.sctSteer.name = 'SteerSocketThread'
         self.sctSteer.start()
 
-        
+
         #create Sensor Client Thread
         self.sctSensor = SensorThread()
         self.sctSensor.name = 'SensorSocketThread'
@@ -59,13 +105,12 @@ class DeepDriveThread(threading.Thread):
         self.keyboardThread = keyboardThread()
         self.keyboardThread.name = 'keyboardThread'
         self.keyboardThread.start()
-        
+
         #connect All client
         self.ConnectClient()
-             
+
         # create neural network
-        self.model = NeuralNetwork()
-        self.model.create()
+        self.model = NeuralNetwork('keras_model/cnn_vgg.h5')
 
         #init runnin gprediction average values with null angle. MANDATORY for the first sample
         self.predictionValuesToAverage  = np.zeros(NB_SAMPLE_RUNNING_AVERAGE_PREDICTION, dtype=np.int)
@@ -79,7 +124,7 @@ class DeepDriveThread(threading.Thread):
         videoClientConnected = False
         steerClientConnected = False
         sensorClientConnected = False
-        
+
         #launch connection thread for all client
         self.sctVideoStream.cmd_q.put(ClientCommand(ClientCommand.CONNECT, 'http://' + CAR_IP + ':' + str(PORT_VIDEO_SERVER) + '/?action=stream'))
         self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.CONNECT, ADDR_STEER_SERVER))
@@ -89,9 +134,9 @@ class DeepDriveThread(threading.Thread):
                 (steerClientConnected != steerClientEnable) or
                 (sensorClientConnected != sensorClientEnable) ):
 
-            #wait for .5 second before to check 
+            #wait for .5 second before to check
             time.sleep(0.5)
-            
+
             if (videoClientConnected != videoClientEnable):
                 try:
                     reply = self.sctVideoStream.reply_q.get(False)
@@ -118,7 +163,7 @@ class DeepDriveThread(threading.Thread):
                         print 'Sensor server connected'
                 except Queue.Empty:
                     print 'Sensor Client not connected'
-            
+
 
 
     def run(self):
@@ -132,19 +177,19 @@ class DeepDriveThread(threading.Thread):
         saved_frame = 0
         total_frame = 0
 
-        image_record_array = np.zeros((1, 38400), dtype=np.uint8)
+        image_record_array = np.zeros((1, COLS * ROWS), dtype=np.uint8)
         label_record_array = np.zeros(1, dtype=np.uint8)
 
-        
-        #init timing  
+
+        #init timing
         lastSteerControlTime = time.time()
         lastSteerKeyboardTime = time.time()
         lastFrameTime = time.time()
-            
+
         #initial steer command set to stop
         try:
             print 'Start Main Thread for Deep Drive'
-            
+
             #start receiver thread client to receive continuously data
             if videoClientEnable == True :
                 self.sctVideoStream.cmd_q.put(ClientCommand(ClientCommand.RECEIVE_IMAGE,''))
@@ -158,8 +203,8 @@ class DeepDriveThread(threading.Thread):
             #start car to be able to see additioanl data
             self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('SPEED',25)))
             self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_ANGLE',0)))
-            
-            
+
+
             while True:
                 ############################# Manage IMAGE for Deep neural network to extract Steer Command ###############
                 try:
@@ -169,12 +214,12 @@ class DeepDriveThread(threading.Thread):
 
                         #print length as debug
                         #print 'length =' + str(len(self.sctVideoStream.lastImage))
-                        
+
                         #decode jpg into array
-                        image = cv2.imdecode(np.fromstring(self.sctVideoStream.lastImage, dtype=np.uint8),cv2.CV_LOAD_IMAGE_GRAYSCALE)
+                        image = cv2.imdecode(np.fromstring(self.sctVideoStream.lastImage, dtype=np.uint8), cv2.CV_LOAD_IMAGE_GRAYSCALE)
 
                         # lower half of the image
-                        half_gray = image[120:240,:]
+                        half_gray = image[ROWS:2 * ROWS, :]
 
                         #cv2.imshow('image', image)
                         cv2.imshow('mlp_image', half_gray)
@@ -184,15 +229,16 @@ class DeepDriveThread(threading.Thread):
                             break
 
                         # reshape image
-                        image_array_byte = half_gray.reshape(1, 38400).astype(np.uint8)
-                        
-                        # Convert image in float 
-                        image_array = np.asarray (image_array_byte, np.float32)
+                        image_array_byte = half_gray.reshape(1, ROWS * COLS).astype(np.uint8)
+
+                        # Convert image in float
+                        image_array = np.asarray(image_array_byte, np.float32)
                         #print image_array;
 
                         # neural network makes prediction
                         NNsteerCommand = self.model.predict(image_array)
 
+                        """
                         #WARNING QUICK AND DIRTY FIX BEFORE WE UNDERSTAND WHY WE HAVE TOO MUCH 0 prediction
                         if NNsteerCommand != 0:
                             # fill average angle table based on prediction
@@ -200,11 +246,12 @@ class DeepDriveThread(threading.Thread):
                             self.predictionIndex += 1
                             if self.predictionIndex >= NB_SAMPLE_RUNNING_AVERAGE_PREDICTION:
                                 self.predictionIndex = 0
+                        """
 
                     else:
                         print 'Error getting image :' + str(reply.data)
                         break
-                        
+
                 except Queue.Empty:
                     #queue empty most of the time because image not ready
                     pass
@@ -220,11 +267,11 @@ class DeepDriveThread(threading.Thread):
                             self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_COMMAND','stop')))
                         else:
                             self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_COMMAND','forward')))
-                        
+
                     else:
                         print 'Error getting Sensor :' + str(reply.data)
                         break
-                        
+
                 except Queue.Empty:
                     #queue empty most of the time because image not ready
                     pass
@@ -238,7 +285,7 @@ class DeepDriveThread(threading.Thread):
                         #new keyboard input found
                         keyPressed = reply.data
                         print 'key Pressed = ' , keyPressed
-                        
+
                         if keyPressed == 'exit':
                             record = 0
                             turn_angle = 0
@@ -246,11 +293,11 @@ class DeepDriveThread(threading.Thread):
                                 totalRecordTime += (time.time() - recordTime)
                             #get out of the loop
                             break
-                        
+
                         elif keyPressed == 'right':
                             record = 1
                             turn_angle = STEP_CAPTURE
-                            
+
                         elif keyPressed == 'left':
                             record = 1
                             turn_angle = -STEP_CAPTURE
@@ -262,35 +309,35 @@ class DeepDriveThread(threading.Thread):
                         elif keyPressed == 'down':
                             self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_COMMAND','stop')))
                             turn_angle = 0
-                            
+
                         elif keyPressed == 'space':
                             record = 1
-                            
+
                         elif keyPressed == 'none':
                             turn_angle = 0
                             record = 0
-                                                  
+
                         else :
                             #none expeted key is pressed
                             print 'Error , another key seems to exist ???'
-                            
+
                         # record lastkey that can be use for consecutive command action
                         lastkeypressed = keyPressed
-                            
+
                     else:
                         print 'Error getting keyboard input :' + str(reply.data)
-                        break             
+                        break
                 except Queue.Empty:
                     #queue empty most of the time because keyboard not hit
                     pass
-                
+
                 #See now if we have to record or not the frame into vstack memory
                 timeNow = time.time()
                 if (record == 1):
                     #start recording time
                     if recordTime == 0:
                         recordTime = time.time()
-                    
+
                     #check if this is time to record a frame
                     if  timeNow > (lastFrameTime + FPS_RECORD_TIME):
                         saved_frame += 1
@@ -303,7 +350,7 @@ class DeepDriveThread(threading.Thread):
                         totalRecordTime += (time.time() - recordTime)
                         recordTime = 0
 
-                #get time and manage ster from keyboard  
+                #get time and manage ster from keyboard
                 timeNow = time.time()
                 if timeNow > (lastSteerKeyboardTime + STEERING_KEYBOARD_SAMPLING_TIME):
                     #it s time to update steer command
@@ -313,7 +360,7 @@ class DeepDriveThread(threading.Thread):
                     elif steerKeyboardAngle <= MIN_ANGLE:
                         steerKeyboardAngle = MIN_ANGLE
                     lastSteerKeyboardTime = timeNow
-                    
+
 
 
                 ############### Control the Car with all the input we can have ####################
@@ -341,10 +388,10 @@ class DeepDriveThread(threading.Thread):
                     timeNow = time.time()
                     if timeNow > (lastSteerControlTime + STEERING_KEYBOARD_SAMPLING_TIME):
                         self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_ANGLE',steerKeyboardAngle)))
-                        #we DO NOT believe prediction and use keyboard correction 
+                        #we DO NOT believe prediction and use keyboard correction
                         self.steerAngleCommand = steerKeyboardAngle
-    
-                        #check and print if prediction is good enough compared to Forced angle                                                    
+
+                        #check and print if prediction is good enough compared to Forced angle
                         prediction = np.sum (self.predictionValuesToAverage, dtype=int) / NB_SAMPLE_RUNNING_AVERAGE_PREDICTION
                         if abs(prediction - steerKeyboardAngle) >  MAX_KEYBOARD_DELTA_ANGLE_TO_PREDICTION:
                             #for now we just print out this potential problem
@@ -354,14 +401,14 @@ class DeepDriveThread(threading.Thread):
                         if lastSteerKeyboardAngle != steerKeyboardAngle:
                             print 'FORCED turn_angle = ',steerKeyboardAngle
                             lastSteerKeyboardAngle = steerKeyboardAngle
-                            
+
                         lastSteerControlTime = timeNow
 
-                
+
         finally:
             print 'ending Deep Driver'
             if totalRecordTime !=0:
-                
+
                 # Convert image in float
                 image_record_array = np.asarray (image_array, np.float32)
 
@@ -376,7 +423,7 @@ class DeepDriveThread(threading.Thread):
                 print(train_labels.shape)
                 print 'Total frame:', total_frame
                 print 'Saved frame:', saved_frame , ' in ', totalRecordTime, ' seconds'
-            
+
             #stop and close all client and close them
             self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_COMMAND','stop')))
             self.sctSteer.cmd_q.put(ClientCommand(ClientCommand.SEND, ('STEER_COMMAND','home')))
@@ -396,16 +443,14 @@ class DeepDriveThread(threading.Thread):
             self.sctSensor.join()
             self.keyboardThread.join()
             print 'Deep Driver Done'
-            
+
 if __name__ == '__main__':
     #create Deep drive thread and strt
     DDriveThread = DeepDriveThread()
     DDriveThread.name = 'DDriveThread'
-    
+
     #start
     DDriveThread.start()
 
     DDriveThread.join()
     print 'end'
-
-
